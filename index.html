@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>G밸리 흡연장</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app"></div>
+  <div id="hud">
+    <div class="title">
+      <div class="place">서울 구로구 · 코오롱싸이언스밸리 1차·2차 사이</div>
+      <div class="name">G밸리 흡연장</div>
+      <div class="clock"><span id="clock">--:--</span> · <span class="online" id="online">오프라인</span></div>
+    </div>
+    <div class="keys">
+      <button data-key="f"><kbd>F</kbd> 1인칭</button>
+      <button data-key="r"><kbd>R</kbd> 비</button>
+      <button data-key="o"><kbd>O</kbd> 자동회전</button>
+      <button data-key="c"><kbd>C</kbd> 시점 리셋</button>
+    </div>
+    <div class="crosshair"></div>
+    <div class="fp-hint"><kbd>WASD</kbd> 이동 · <kbd>G</kbd> 담배 · <kbd>E</kbd>/<kbd>좌클릭</kbd> 꾹 빨기 · <kbd>Q</kbd>/<kbd>우클릭</kbd> 꾹 도넛 · <kbd>X</kbd> 재 털기 · <kbd>Enter</kbd> 채팅 · <kbd>F</kbd> 3인칭</div>
+    <div class="ctx" id="ctxHint"></div>
+    <div class="smokebar" id="smokebar">
+      <div class="row"><span class="pack"><b id="packCount">20</b>/20</span><span class="sep">·</span>오늘 <b id="todayCount">0</b>개비</div>
+      <div class="cigbar"><div class="ash" id="cigAsh"></div><div class="paper" id="cigPaper"></div><div class="filter"></div></div>
+      <div class="row small">자리 비운 지 <b id="away">00:00</b></div>
+    </div>
+    <div class="toasts" id="toasts"></div>
+    <div class="chat">
+      <div id="chatLog"></div>
+      <input id="chatInput" maxlength="80" placeholder="메시지 입력 후 Enter (Esc 취소)" autocomplete="off" />
+    </div>
+    <div class="pause" id="pause"><div><div class="big">클릭해서 계속</div><div class="small"><kbd>Enter</kbd> 채팅 · <kbd>F</kbd> 3인칭으로 보기</div></div></div>
+    <div class="join" id="join">
+      <div class="card">
+        <div class="place">서울 구로구 · 코오롱싸이언스밸리 1차·2차 사이</div>
+        <h1>G밸리 흡연장</h1>
+        <p>잠깐 바람 좀 쐬고 올게요.</p>
+        <input id="nick" maxlength="12" placeholder="닉네임" autocomplete="off" />
+        <div class="swatches" id="swatches"></div>
+        <button id="enter">담배 피러 나가기</button>
+        <div class="note">같은 주소로 접속한 사람끼리 같은 흡연장에 서게 돼요</div>
+      </div>
+    </div>
+    <div class="loading" id="loading">흡연장 가는 중…</div>
+    <div class="attrib">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

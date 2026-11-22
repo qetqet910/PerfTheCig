@@ -1,0 +1,13 @@
+# Render 블루프린트: 저장소 루트에 두면 Render가 자동 인식
+# 화면(dist) + 멀티플레이 웹소켓(/ws)을 서비스 하나로 서빙
+services:
+  - type: web
+    name: gvalley-smoking
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22
