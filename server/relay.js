@@ -20,6 +20,7 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 });
   const players = new Map(); // id -> { ws, info }
   const butts = [];           // [x, z] 바닥 꽁초 (공유)
+  const trayButts = [];       // [재떨이번호, dx, dz] 재떨이에 꽂힌 꽁초 (공유)
   let nextId = 1;
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -55,7 +56,7 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
           x: 0, z: 0, ry: 0, s: 0, k: 0, inh: 0, c: 0, len: 1, ash: 0,
         };
         players.set(id, { ws, info });
-        send(ws, { t: 'welcome', id, butts, players: [...players.values()].filter((p) => p.info.id !== id).map((p) => p.info) });
+        send(ws, { t: 'welcome', id, butts, trayButts, players: [...players.values()].filter((p) => p.info.id !== id).map((p) => p.info) });
         broadcast({ t: 'join', player: info }, id);
         log(`[relay] join #${id} ${info.name} (${players.size})`);
         return;
@@ -78,9 +79,11 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
         if (Array.isArray(m.d)) out.d = m.d.slice(0, 3).map((v) => num(v, 10));
         if (m.k !== undefined) out.k = num(m.k, 3);
         if (m.to !== undefined) out.to = Math.round(num(m.to, 1e9));
+        if (m.tray !== undefined) out.tray = Math.round(num(m.tray, 16));
         if (m.kind === 'butt') {
           out.x = num(m.x, 2000); out.z = num(m.z, 2000); out.inTray = !!m.inTray;
           if (!out.inTray) { butts.push([out.x, out.z]); if (butts.length > MAX_BUTTS) butts.shift(); }
+          else if (out.tray >= 0) { trayButts.push([out.tray, num(m.x, 1), num(m.z, 1)]); if (trayButts.length > MAX_BUTTS) trayButts.shift(); }
         }
         broadcast(out, id);
       } else if (m.t === 'chat') {

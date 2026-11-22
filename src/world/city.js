@@ -178,7 +178,7 @@ function radialTexture() {
 
 /** 절차적 창문 + 야근 불빛 셰이더 */
 function createBuildingMaterial() {
-  const mat = new THREE.MeshStandardMaterial({ color: 0x2c313b, roughness: 0.82, metalness: 0.15 });
+  const mat = new THREE.MeshStandardMaterial({ color: 0x23272f, roughness: 0.95, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
@@ -207,12 +207,12 @@ function createBuildingMaterial() {
               : step(0.14, f.x) * step(f.x, 0.86) * step(0.22, f.y) * step(f.y, 0.82);
             vec3 seed = vec3(cell, floor(n.x * 7.0 + n.z * 13.0 + 0.5) + floor(vWPos.x / 97.0) * 3.0);
             float r = h3(seed);
-            float lit = street ? step(0.6, r) : step(0.66, r);
+            float lit = street ? step(0.75, r) : step(0.78, r);
             // 사무실 형광등(야근) vs 오피스텔 전구색
             vec3 cool = vec3(0.70, 0.85, 1.0);
             vec3 warm = vec3(1.0, 0.70, 0.40);
             vec3 wc = street ? vec3(1.0, 0.88, 0.7) : mix(cool, warm, step(0.62, h3(seed + 3.1)));
-            float k = (0.45 + 0.55 * h3(seed + 7.7)) * (street ? 0.45 : 0.9);
+            float k = (0.45 + 0.55 * h3(seed + 7.7)) * (street ? 0.15 : 0.22);
             totalEmissiveRadiance += win * lit * wc * k;
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.03, 0.04, 0.055), win * (1.0 - lit));
           }

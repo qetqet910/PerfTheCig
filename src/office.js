@@ -74,7 +74,7 @@ export function createOffice({ toastsEl, sfx }) {
     },
     onLit() {
       litCount++;
-      if (litCount === 1) toast('시스템', '불 붙었다. E 꾹 눌러서 빨고, 떼면 후~', true);
+      if (litCount === 1) toast('시스템', '불 붙었다. 좌클릭 꾹 빨고, 떼면 후~', true);
     },
     onFinished(today) {
       if (COUNT[today]) toast('시스템', COUNT[today], true);

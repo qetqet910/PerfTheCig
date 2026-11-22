@@ -13,7 +13,14 @@ export class CollisionWorld {
   }
 
   add({ polygons = [], segments = [], circles = [], boxes = [] }) {
-    for (const p of polygons) {
+    // 박스도 닫힌 폴리곤으로 취급 (안쪽 판정이 필요해서)
+    const boxPolys = boxes.map(([cx, cz, hw, hd, ry = 0]) => {
+      const c = Math.cos(ry), s = Math.sin(ry);
+      // three.js rotation.y: x' = x cos + z sin, z' = -x sin + z cos
+      const pt = (x, z) => [cx + x * c + z * s, cz - x * s + z * c];
+      return [pt(-hw, -hd), pt(hw, -hd), pt(hw, hd), pt(-hw, hd)];
+    });
+    for (const p of [...polygons, ...boxPolys]) {
       const from = this.segments.length;
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
       for (let i = 0; i < p.length; i++) {
@@ -22,20 +29,36 @@ export class CollisionWorld {
         minX = Math.min(minX, a[0]); maxX = Math.max(maxX, a[0]);
         minZ = Math.min(minZ, a[1]); maxZ = Math.max(maxZ, a[1]);
       }
-      this.polys.push({ minX, maxX, minZ, maxZ, from, to: this.segments.length });
+      this.polys.push({ minX, maxX, minZ, maxZ, from, to: this.segments.length, closed: true });
     }
     const loose = { minX: -Infinity, maxX: Infinity, minZ: -Infinity, maxZ: Infinity, from: this.segments.length };
     for (const s of segments) this.segments.push(s);
-    for (const [cx, cz, hw, hd, ry = 0] of boxes) {
-      const c = Math.cos(ry), s = Math.sin(ry);
-      // three.js rotation.y: x' = x cos + z sin, z' = -x sin + z cos
-      const pt = (x, z) => [cx + x * c + z * s, cz - x * s + z * c];
-      const q = [pt(-hw, -hd), pt(hw, -hd), pt(hw, hd), pt(-hw, hd)];
-      for (let i = 0; i < 4; i++) this.segments.push([...q[i], ...q[(i + 1) % 4]]);
-    }
     loose.to = this.segments.length;
     if (loose.to > loose.from) this.polys.push(loose);
     for (const c of circles) this.circles.push(c);
+  }
+
+  inside(pos, p) {
+    let c = false;
+    for (let i = p.from; i < p.to; i++) {
+      const [ax, az, bx, bz] = this.segments[i];
+      if ((az > pos.z) !== (bz > pos.z) && pos.x < ((bx - ax) * (pos.z - az)) / (bz - az) + ax) c = !c;
+    }
+    return c;
+  }
+
+  pushOut(pos, p, r) {
+    let best = Infinity, qx = 0, qz = 0;
+    for (let i = p.from; i < p.to; i++) {
+      const [ax, az, bx, bz] = this.segments[i];
+      const dx = bx - ax, dz = bz - az;
+      const t = Math.max(0, Math.min(1, ((pos.x - ax) * dx + (pos.z - az) * dz) / (dx * dx + dz * dz || 1)));
+      const x = ax + dx * t, z = az + dz * t, d = Math.hypot(pos.x - x, pos.z - z);
+      if (d < best) { best = d; qx = x; qz = z; }
+    }
+    const ox = qx - pos.x, oz = qz - pos.z, d = Math.hypot(ox, oz) || 1;
+    pos.x = qx + (ox / d) * r;
+    pos.z = qz + (oz / d) * r;
   }
 
   /** pos {x,z}를 충돌 밖으로 밀어냄 (in-place) */
@@ -44,6 +67,8 @@ export class CollisionWorld {
       let moved = false;
       for (const p of this.polys) {
         if (pos.x < p.minX - r || pos.x > p.maxX + r || pos.z < p.minZ - r || pos.z > p.maxZ + r) continue;
+        // 중심이 닫힌 도형 안에 들어가 있으면(스폰/순간이동) 가장 가까운 변 바깥으로 빼냄
+        if (p.closed && this.inside(pos, p)) { this.pushOut(pos, p, r); moved = true; continue; }
         for (let i = p.from; i < p.to; i++) moved = pushFromSegment(pos, this.segments[i], r) || moved;
       }
       for (const [cx, cz, cr] of this.circles) {

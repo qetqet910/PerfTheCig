@@ -8,13 +8,14 @@ import { canvasTexture, FONT } from '../util.js';
  */
 export const AREA = { X0: -6.2, X1: 9.0, WALL: 6 };
 export const ASHTRAYS = [[-2.0, -1.5], [2.5, 1.8], [5.2, -2.2]];
+// 비 가림막 (폴리카보네이트 지붕) 범위: 흡연구역 위를 1차~2차 벽까지 덮음
+export const SHELTER = { x0: -6.6, x1: 9.4, z0: -6, z1: 6, y: 3.7 };
 
 export function createSmokingArea({ envMap }) {
   const group = new THREE.Group();
   const circles = [], boxes = [];
   const { X0, X1, WALL } = AREA;
 
-  const steel = new THREE.MeshStandardMaterial({ color: 0xb8bcc0, metalness: 1, roughness: 0.28, envMap, envMapIntensity: 0.5 });
   const metal = new THREE.MeshStandardMaterial({ color: 0x3b3f44, metalness: 0.7, roughness: 0.4, envMap, envMapIntensity: 0.3 });
   const concrete = new THREE.MeshStandardMaterial({ color: 0x6d6c69, roughness: 0.95 });
   const add = (mesh, x, y, z, ry = 0) => {
@@ -57,35 +58,98 @@ export function createSmokingArea({ envMap }) {
   floorText.position.set(X0 + 1.2, 0.038, 0);
   group.add(floorText);
 
-  // ---------- 스탠드 재떨이 ----------
+  // ---------- 재떨이: 흙 채운 콘크리트 통 ----------
+  const potMat = new THREE.MeshStandardMaterial({ color: 0x5e5a55, roughness: 1, metalness: 0 });
+  const soilMat = new THREE.MeshStandardMaterial({ color: 0x3a2e24, roughness: 1, metalness: 0 });
+  const buttMats = [new THREE.MeshStandardMaterial({ color: 0xd9d2c4, roughness: 1 }), new THREE.MeshStandardMaterial({ color: 0xa8743e, roughness: 1 })];
   const ashtray = (x, z) => {
     const g = new THREE.Group();
-    for (const [geo, y] of [
-      [new THREE.CylinderGeometry(0.05, 0.05, 0.85, 12), 0.425],
-      [new THREE.CylinderGeometry(0.19, 0.14, 0.15, 20), 0.9],
-      [new THREE.CylinderGeometry(0.21, 0.23, 0.04, 20), 0.02],
-    ]) {
-      const m = new THREE.Mesh(geo, steel);
-      m.position.y = y;
-      m.castShadow = true;
-      g.add(m);
-    }
-    const sand = new THREE.Mesh(new THREE.CircleGeometry(0.175, 20), new THREE.MeshStandardMaterial({ color: 0x4f473f, roughness: 1 }));
-    sand.rotation.x = -Math.PI / 2;
-    sand.position.y = 0.97;
-    g.add(sand);
-    for (let i = 0; i < 7; i++) {
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.03, 5), new THREE.MeshStandardMaterial({ color: i % 3 ? 0xece6da : 0xc98a4a }));
-      const a = Math.random() * Math.PI * 2, r = Math.random() * 0.13;
-      b.position.set(Math.cos(a) * r, 0.98, Math.sin(a) * r);
-      b.rotation.set((Math.random() - 0.5) * 1.2, 0, (Math.random() - 0.5) * 1.2);
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.26, 0.62, 24, 1, true), potMat);
+    pot.position.y = 0.31;
+    pot.castShadow = pot.receiveShadow = true;
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.025, 6, 24), potMat);
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 0.62;
+    const soil = new THREE.Mesh(new THREE.CircleGeometry(0.285, 24), soilMat);
+    soil.rotation.x = -Math.PI / 2;
+    soil.position.y = 0.57;
+    soil.receiveShadow = true;
+    g.add(pot, rim, soil);
+    // 흙에 꽂힌 꽁초들
+    for (let i = 0; i < 16; i++) {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.034, 5), buttMats[i % 4 === 0 ? 1 : 0]);
+      const a = Math.random() * Math.PI * 2, r = Math.random() * 0.24;
+      b.position.set(Math.cos(a) * r, 0.585, Math.sin(a) * r);
+      b.rotation.set((Math.random() - 0.5) * 1.6, 0, (Math.random() - 0.5) * 1.6);
       g.add(b);
     }
     g.position.set(x, 0, z);
     group.add(g);
-    circles.push([x, z, 0.22]);
+    circles.push([x, z, 0.33]);
+
+    // 흙 위에 쌓이는 재 (회색 부스러기)
+    const ASH_CAP = 160;
+    const ash = new THREE.InstancedMesh(new THREE.CircleGeometry(0.012, 6).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x8e8a85, roughness: 1 }), ASH_CAP);
+    ash.count = 0;
+    ash.position.y = 0.572;
+    g.add(ash);
+    // 재떨이에 버린 꽁초 (공유)
+    const BUTT_CAP = 80;
+    const butts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.005, 0.005, 0.034, 5), buttMats[0], BUTT_CAP);
+    butts.count = 0;
+    g.add(butts);
+    // 가까이 가면 바닥에 뜨는 링
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.47, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+    ring.position.y = 0.04;
+    g.add(ring);
+
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), p = new THREE.Vector3();
+    const tray = {
+      x, z, top: new THREE.Vector3(x, 0.66, z), count: 0, ashAmount: 0, smolders: [], highlight: 0,
+      /** 재 추가 (m 단위 길이 → 부스러기 개수) */
+      addAsh(amount = 0.01) {
+        const n = Math.max(2, Math.round(amount * 220));
+        for (let k = 0; k < n; k++) {
+          const i = ash.count < ASH_CAP ? ash.count++ : Math.floor(Math.random() * ASH_CAP);
+          const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 0.25;
+          const s = 0.6 + Math.random() * 1.2;
+          m.compose(p.set(Math.cos(a) * r, Math.random() * 0.002, Math.sin(a) * r), q.identity(), sc.set(s, 1, s));
+          ash.setMatrixAt(i, m);
+        }
+        ash.instanceMatrix.needsUpdate = true;
+        tray.ashAmount += amount;
+      },
+      /** 꽁초 꽂기. dx/dz 없으면 랜덤 위치. 반환: 꽂힌 월드 좌표 */
+      addButt(dx, dz, smolder = false) {
+        if (dx === undefined) { const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 0.23; dx = Math.cos(a) * r; dz = Math.sin(a) * r; }
+        const i = butts.count < BUTT_CAP ? butts.count++ : Math.floor(Math.random() * BUTT_CAP);
+        m.compose(p.set(dx, 0.585, dz), q.setFromEuler(e.set((Math.random() - 0.5) * 1.4, Math.random() * 6, (Math.random() - 0.5) * 1.4)), sc.set(1, 1, 1));
+        butts.setMatrixAt(i, m);
+        butts.instanceMatrix.needsUpdate = true;
+        tray.count++;
+        const world = new THREE.Vector3(x + dx, 0.6, z + dz);
+        if (smolder) tray.smolders.push({ p: world, until: performance.now() + 6000, acc: 0 });
+        return { dx, dz, world };
+      },
+      setHighlight(v) { tray.highlight = v ? 1 : 0; },
+      update(dt, smoke) {
+        ring.material.opacity += (tray.highlight * 0.35 - ring.material.opacity) * Math.min(1, dt * 8);
+        const now = performance.now();
+        tray.smolders = tray.smolders.filter((s) => s.until > now);
+        for (const s of tray.smolders) {
+          s.acc += dt * 6 * ((s.until - now) / 6000);
+          while (s.acc > 1) {
+            s.acc -= 1;
+            smoke.emit(s.p, p.set((Math.random() - 0.5) * 0.02, 0.1, (Math.random() - 0.5) * 0.02), { size: 0.02, grow: 0.12, life: 2.5, alpha: 0.16 });
+          }
+        }
+      },
+    };
+    return tray;
   };
-  ASHTRAYS.forEach(([x, z]) => ashtray(x, z));
+  const trays = ASHTRAYS.map(([x, z]) => ashtray(x, z));
+  // 처음부터 좀 쓴 재떨이
+  trays.forEach((t) => { t.addAsh(0.08 + Math.random() * 0.1); for (let i = 0; i < 6 + Math.floor(Math.random() * 6); i++) t.addButt(); });
 
   // ---------- 2차 벽 쪽: 벤치 2개, 뒷문 + 비상구, 실외기 ----------
   const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a32, roughness: 0.75 });
@@ -110,11 +174,11 @@ export function createSmokingArea({ envMap }) {
   bench(-3.4, WALL - 0.55);
   bench(4.4, WALL - 0.55);
 
-  const doorMat = new THREE.MeshStandardMaterial({ color: 0x1a2028, metalness: 0.4, roughness: 0.3, emissive: 0x9fb8d0, emissiveIntensity: 0.25 });
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0x1a2028, metalness: 0.4, roughness: 0.3, emissive: 0x9fb8d0, emissiveIntensity: 0.04 });
   add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.3, 0.1), metal), 0.6, 1.15, WALL - 0.22);
   add(new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.15), doorMat), 0.6, 1.1, WALL - 0.28, Math.PI);
   const exitTex = exitTexture();
-  add(new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.18), new THREE.MeshStandardMaterial({ map: exitTex, emissive: 0xffffff, emissiveMap: exitTex, emissiveIntensity: 2.2 })), 0.6, 2.55, WALL - 0.27, Math.PI);
+  add(new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.18), new THREE.MeshStandardMaterial({ map: exitTex, emissive: 0xffffff, emissiveMap: exitTex, emissiveIntensity: 0.5 })), 0.6, 2.55, WALL - 0.27, Math.PI);
 
   const acMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d2, roughness: 0.6 });
   const grill = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
@@ -134,11 +198,9 @@ export function createSmokingArea({ envMap }) {
     cab.position.y = 0.925;
     cab.castShadow = cab.receiveShadow = true;
     const vtex = vendTexture(label);
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 1.2), new THREE.MeshStandardMaterial({ map: vtex, emissive: 0xffffff, emissiveMap: vtex, emissiveIntensity: 0.7 }));
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 1.2), new THREE.MeshStandardMaterial({ map: vtex, emissive: 0xffffff, emissiveMap: vtex, emissiveIntensity: 0.18 }));
     front.position.set(0, 1.18, 0.376);
-    const light = new THREE.PointLight(0xdfe9ff, 2, 4, 2);
-    light.position.set(0, 1.2, 0.8);
-    v.add(cab, front, light);
+    v.add(cab, front);
     v.position.set(x, 0, -WALL + 0.42);
     group.add(v);
     boxes.push([x, -WALL + 0.42, 0.5, 0.375, 0]);
@@ -165,41 +227,74 @@ export function createSmokingArea({ envMap }) {
   planter(-4.4, -WALL + 0.35, 2.6);
   planter(6.6, -WALL + 0.35, 2.2);
 
-  // ---------- 조명: 양쪽 벽등 + 통로 입구 가로등(그림자) ----------
-  const wallLampMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffe0b8, emissiveIntensity: 6 });
-  for (const [x, z] of [[-3.5, -WALL + 0.12], [4.5, -WALL + 0.12], [-1.2, WALL - 0.12], [6.0, WALL - 0.12]]) {
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.18), wallLampMat), x, 3.4, z);
-    const l = new THREE.PointLight(0xffd9a8, 3, 8, 1.8);
-    l.position.set(x, 3.0, z * 0.75);
-    group.add(l);
+  // ---------- 조명: 가로등만 (통로 입구 + 통로 안쪽) ----------
+  const headMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffdcaa, emissiveIntensity: 8 });
+  const streetLamp = (x, z, dir, target, intensity) => {
+    const lamp = new THREE.Group();
+    lamp.position.set(x, 0, z);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 6.5, 10), metal);
+    pole.position.y = 3.25;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.07, 0.07), metal);
+    arm.position.set(0.75 * dir, 6.45, 0);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.3), headMat);
+    head.position.set(1.45 * dir, 6.4, 0);
+    pole.castShadow = arm.castShadow = true;
+    lamp.add(pole, arm, head);
+    group.add(lamp);
+    circles.push([x, z, 0.12]);
+    const spot = new THREE.SpotLight(0xffd6a0, intensity, 34, 0.8, 0.6, 1.6);
+    spot.position.set(x + 1.45 * dir, 6.3, z);
+    spot.target.position.set(...target);
+    spot.castShadow = true;
+    spot.shadow.mapSize.set(2048, 2048);
+    spot.shadow.bias = -0.0004;
+    spot.shadow.normalBias = 0.02;
+    spot.shadow.camera.near = 0.5;
+    spot.shadow.camera.far = 34;
+    group.add(spot, spot.target);
+  };
+  streetLamp(-14.6, -4.9, 1, [-1.0, 0, 0], 210);
+  streetLamp(12.2, 4.9, -1, [3.5, 0, 0], 150);
+
+  // ---------- 비 가림막: 철골 기둥 + 반투명 폴리카보네이트 지붕 (2차 쪽으로 살짝 기울어 물 빠짐) ----------
+  const S = SHELTER;
+  const frame = new THREE.MeshStandardMaterial({ color: 0x2c3036, metalness: 0.6, roughness: 0.5 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x9ab0b8, transparent: true, opacity: 0.38, roughness: 0.35, metalness: 0, side: THREE.DoubleSide, depthWrite: false });
+  const tilt = 0.06;
+  const roofY = (z) => S.y - z * tilt; // z가 클수록(2차 쪽) 낮음
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(S.x1 - S.x0, 0.02, S.z1 - S.z0 - 0.1), roofMat);
+  roof.position.set((S.x0 + S.x1) / 2, S.y, 0);
+  roof.rotation.x = tilt;
+  roof.renderOrder = 2;
+  group.add(roof);
+  for (let x = S.x0 + 0.2; x <= S.x1; x += 1.0) {
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, S.z1 - S.z0 - 0.1), frame);
+    rib.position.set(x, S.y + 0.03, 0);
+    rib.rotation.x = tilt;
+    group.add(rib);
   }
-  const lamp = new THREE.Group();
-  lamp.position.set(-14.6, 0, -4.9);
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 6.5, 10), metal);
-  pole.position.y = 3.25;
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.07, 0.07), metal);
-  arm.position.set(0.75, 6.45, 0);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.3), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffdcaa, emissiveIntensity: 8 }));
-  head.position.set(1.45, 6.4, 0);
-  pole.castShadow = arm.castShadow = true;
-  lamp.add(pole, arm, head);
-  group.add(lamp);
-  circles.push([-14.6, -4.9, 0.12]);
-  const spot = new THREE.SpotLight(0xffd6a0, 190, 34, 0.75, 0.6, 1.6);
-  spot.position.set(-14.6 + 1.45, 6.3, -4.9);
-  spot.target.position.set(0.5, 0, 0);
-  spot.castShadow = true;
-  spot.shadow.mapSize.set(2048, 2048);
-  spot.shadow.bias = -0.0004;
-  spot.shadow.normalBias = 0.02;
-  spot.shadow.camera.near = 0.5;
-  spot.shadow.camera.far = 34;
-  group.add(spot, spot.target);
+  // 앞뒤 보 + 벽 쪽 기둥 (통로 가운데는 비워서 지나다닐 수 있게)
+  for (const x of [S.x0, S.x1]) {
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, S.z1 - S.z0 - 0.1), frame);
+    beam.position.set(x, S.y - 0.1, 0);
+    beam.rotation.x = tilt;
+    beam.castShadow = true;
+    group.add(beam);
+    for (const z of [S.z0 + 0.25, S.z1 - 0.25]) {
+      const h = roofY(z) - 0.15;
+      add(new THREE.Mesh(new THREE.BoxGeometry(0.12, h, 0.12), frame), x, h / 2, z);
+      circles.push([x, z, 0.1]);
+    }
+  }
+  // 빗물받이 (2차 쪽)
+  const gutter = new THREE.Mesh(new THREE.BoxGeometry(S.x1 - S.x0, 0.12, 0.14), frame);
+  gutter.position.set((S.x0 + S.x1) / 2, roofY(S.z1 - 0.12) - 0.08, S.z1 - 0.12);
+  group.add(gutter);
 
   // ---------- 흡연구역 표지판 ----------
   add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.3, 8), metal), X0 + 0.3, 1.15, -WALL + 0.9);
   const signTex = signTexture();
-  const signMat = new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.9 });
+  const signMat = new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.15 });
   // 앞뒤 따로 (DoubleSide면 뒤에서 글씨가 뒤집혀 보임)
   add(new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.44), signMat), X0 + 0.29, 2.05, -WALL + 0.9, -Math.PI / 2);
   add(new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.44), signMat), X0 + 0.31, 2.05, -WALL + 0.9, Math.PI / 2);
@@ -225,17 +320,20 @@ export function createSmokingArea({ envMap }) {
     addButt(ax + Math.cos(a) * r, az + Math.sin(a) * r);
   }
 
-  return { group, colliders: { circles, boxes }, addButt };
+  return {
+    group, colliders: { circles, boxes }, addButt, trays,
+    update(dt, smoke) { for (const t of trays) t.update(dt, smoke); },
+  };
 }
 
 /** 가장 가까운 재떨이까지 거리 */
 export function nearestAshtray(x, z) {
-  let best = Infinity, at = null;
-  for (const a of ASHTRAYS) {
+  let best = Infinity, at = null, idx = -1;
+  ASHTRAYS.forEach((a, i) => {
     const d = Math.hypot(a[0] - x, a[1] - z);
-    if (d < best) { best = d; at = a; }
-  }
-  return { dist: best, at };
+    if (d < best) { best = d; at = a; idx = i; }
+  });
+  return { dist: best, at, idx };
 }
 
 // ---------- textures ----------

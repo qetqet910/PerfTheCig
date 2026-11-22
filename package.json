@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "osm": "node scripts/convert-osm.mjs public/data/guro_raw.json public/data/guro.json",
-    "start": "node server/server.js"
+    "start": "node server/server.js",
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
     "three": "^0.187.0",

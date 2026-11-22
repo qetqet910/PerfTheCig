@@ -6,7 +6,7 @@ import { Smoker } from '../smoke/smoker.js';
 const EYE = 1.3; // SD 캐릭터 눈높이 근처
 const RADIUS = 0.28;
 const WALK = 1.6, RUN = 4.2;
-const SPAWN = { pos: new THREE.Vector3(-17.5, 0, 1.5), lookAt: new THREE.Vector3(0, 1.1, 0) };
+const SPAWN = { pos: new THREE.Vector3(-5.0, 0, 2.6), lookAt: new THREE.Vector3(0.5, 1.0, -0.4) };
 
 /**
  * 1인칭: 포인터락 마우스룩 + WASD + 충돌 + 흡연(Smoker 상태 머신 + 뷰모델)
@@ -21,7 +21,7 @@ export class FirstPerson {
     this.getContext = getContext || (() => ({}));
     this.active = false;
     this.controls = new PointerLockControls(camera, dom);
-    this.controls.pointerSpeed = 0.8;
+    this.controls.pointerSpeed = 0.7;
     this.keys = new Set();
     this.vel = new THREE.Vector2();
     this.feet = new THREE.Vector3();
@@ -50,14 +50,35 @@ export class FirstPerson {
     });
     addEventListener('blur', () => this.clearInput());
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 마우스만으로 흡연:
+    //   담배 없음/다 핌: 좌·우클릭 = 꺼내 물기 / 꽁초 버리기
+    //   피우는 중: 좌클릭 꾹 = 빨기(떼면 후~), 톡 = 재 털기 / 우클릭 꾹 = 도넛, 톡 = 끄고 버리기
+    this.downAt = [-1, -1, -1];
+    const TAP = 230;
     dom.addEventListener('mousedown', (e) => {
-      if (!this.active || !this.controls.isLocked) return;
-      if (e.button === 0) this.smoker.press('puff');
-      if (e.button === 2) this.smoker.press('ring');
+      if (!this.active || !this.controls.isLocked || (e.button !== 0 && e.button !== 2)) return;
+      const sm = this.smoker;
+      this.downAt[e.button] = performance.now();
+      if (sm.state === 'none' || sm.state === 'done') {
+        sm.context(this.getContext());
+        this.downAt[e.button] = -1; // 소비됨
+      } else if (sm.state === 'lit') {
+        sm.press(e.button === 0 ? 'puff' : 'ring');
+      } else if (sm.state === 'lighting') {
+        sm.press('puff'); // 물고 빨아야 불이 붙음
+      }
     });
     addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.smoker.release('puff');
-      if (e.button === 2) this.smoker.release('ring');
+      if (e.button !== 0 && e.button !== 2) return;
+      const t0 = this.downAt[e.button];
+      this.downAt[e.button] = -1;
+      const tap = t0 > 0 && performance.now() - t0 < TAP;
+      const sm = this.smoker;
+      sm.release(e.button === 0 ? 'puff' : 'ring'); // 짧게 눌렀으면 들숨이 얕아서 후~ 안 나옴
+      if (tap && sm.state === 'lit') {
+        if (e.button === 0) sm.flick();
+        else sm.context(this.getContext());
+      }
     });
 
     // 뷰모델: 담배 + 라이터
@@ -74,7 +95,7 @@ export class FirstPerson {
       this.vm.add(f);
     }
     this.vm.visible = false;
-    this.vm.scale.setScalar(0.8);
+    this.vm.scale.setScalar(1.05);
     camera.add(this.vm);
     this.lighter = createLighter({ scale: 1 });
     this.lighter.group.visible = false;
@@ -83,6 +104,15 @@ export class FirstPerson {
 
     this.vmT = 0;   // 입으로 올리는 정도 (0..1)
     this.lightT = 0;
+    this.scene = scene;
+    // 재 털기 애니메이션: 손을 재떨이 위로 → 툭, 툭 → 복귀
+    this.flick = null;      // { t, dur, amount, target(Vector3|null), taps:[], outer, data }
+    this.shownAsh = 0;      // 화면에 보이는 재 길이 (털기 전까지 유지)
+    this.chunks = [];       // 떨어지는 재 덩어리
+    this.chunkGeo = new THREE.CylinderGeometry(0.0034, 0.003, 1, 7);
+    this.chunkMat = new THREE.MeshStandardMaterial({ color: 0x9a9690, roughness: 1 });
+    // 내뱉기: 한 번에 터지지 않고 길게 흘러나옴 + 잔연기
+    this.streams = [];
     this._v = new THREE.Vector3();
     this._v2 = new THREE.Vector3();
   }
@@ -97,7 +127,12 @@ export class FirstPerson {
       const p = this._v.copy(cam.position).addScaledVector(dir, 0.22);
       p.y -= 0.08;
       if (data.type === 'ring') { dir.y += 0.05; this.smoke.ring(p, dir.normalize(), data.k); }
-      else { dir.y -= 0.12; this.smoke.puff(p, dir.normalize(), data.k); }
+      else {
+        dir.y -= 0.12;
+        dir.normalize();
+        this.smoke.puff(p, dir, data.k * 0.45);                       // 첫 후~
+        this.streams.push({ t: 0, dur: 0.6 + data.k * 0.5, k: data.k, acc: 0 }); // 이어서 흘러나옴
+      }
       data.p = p.clone();
       data.d = dir.clone();
     } else if (name === 'cough') {
@@ -106,8 +141,18 @@ export class FirstPerson {
       const p = this._v.copy(cam.position).addScaledVector(dir, 0.2);
       [0, 300, 560, 950].forEach((ms) => setTimeout(() => this.smoke.puff(p, dir, 0.35), ms));
     } else if (name === 'ash') {
+      const ctx = this.getContext();
+      const near = ctx.tray && ctx.ashtrayDist < 1.1;
+      if (near) data.tray = ctx.trayIdx;
+      if (data.flicked) {
+        // 툭툭 터는 애니메이션이 끝나는 타이밍에 맞춰 바깥 이벤트 실행
+        this.flick = { t: 0, dur: 0.75, amount: data.amount, target: near ? ctx.tray.top.clone() : null, tapped: 0, outer, data };
+        this.shownAsh = data.amount;
+        return;
+      }
+      // 저절로 떨어진 재: 팁에서 바로 툭
       this.cig.tipWorld(this._v);
-      this.smoke.ash(this._v, data.amount);
+      this.dropChunk(this._v, data.amount, near ? ctx.tray : null);
       data.p = this._v.clone();
     } else if (name === 'butt') {
       const dir = cam.getWorldDirection(this._v2.clone());
@@ -116,6 +161,74 @@ export class FirstPerson {
       data.z = this.feet.z + dir.z * 0.6;
     }
     outer?.(name, data);
+  }
+
+  /** 재 덩어리 하나가 떨어짐 (재떨이 위면 재떨이 흙 높이에서 멈춤) */
+  dropChunk(p, amount, tray) {
+    const m = new THREE.Mesh(this.chunkGeo, this.chunkMat);
+    m.scale.y = Math.max(0.004, Math.min(0.025, amount));
+    m.position.copy(p);
+    m.rotation.set(Math.random() * 0.6, 0, Math.PI / 2 + (Math.random() - 0.5) * 0.6);
+    m.castShadow = true;
+    this.scene.add(m);
+    const floor = tray && Math.hypot(p.x - tray.x, p.z - tray.z) < 0.32 ? 0.58 : 0.045;
+    this.chunks.push({ m, vy: -0.2, vx: (Math.random() - 0.5) * 0.1, vz: (Math.random() - 0.5) * 0.1, floor, life: 3.5, spin: (Math.random() - 0.5) * 8 });
+    this.smoke.ash(p, amount * 0.5); // 같이 흩날리는 부스러기
+  }
+
+  updateEffects(dt) {
+    // 떨어지는 재 덩어리
+    for (const c of this.chunks) {
+      c.life -= dt;
+      if (c.m.position.y > c.floor) {
+        c.vy -= 9.8 * dt;
+        c.m.position.x += c.vx * dt;
+        c.m.position.z += c.vz * dt;
+        c.m.position.y = Math.max(c.floor, c.m.position.y + c.vy * dt);
+        c.m.rotation.x += c.spin * dt;
+        if (c.m.position.y <= c.floor) { // 바닥/흙에 닿으면 부서짐
+          this.smoke.ash(c.m.position, 0.006);
+          c.m.scale.y *= 0.5;
+        }
+      }
+      if (c.life < 0.6) c.m.scale.setScalar(Math.max(0.001, c.life / 0.6)).setY(c.m.scale.y);
+    }
+    this.chunks = this.chunks.filter((c) => {
+      if (c.life > 0) return true;
+      this.scene.remove(c.m);
+      return false;
+    });
+
+    // 길게 흘러나오는 날숨 + 끝나고 코/입으로 남는 잔연기
+    const cam = this.camera;
+    for (const st of this.streams) {
+      st.t += dt;
+      const f = 1 - st.t / st.dur;
+      if (f <= 0) continue;
+      st.acc += dt * 60 * f;
+      const dir = cam.getWorldDirection(this._v2).clone();
+      dir.y -= 0.18;
+      dir.normalize();
+      const p = this._v.copy(cam.position).addScaledVector(dir, 0.2);
+      p.y -= 0.07;
+      while (st.acc > 1) {
+        st.acc -= 1;
+        const v = dir.clone().multiplyScalar((0.35 + Math.random() * 0.5) * st.k * (0.4 + f));
+        v.x += (Math.random() - 0.5) * 0.12; v.y += (Math.random() - 0.4) * 0.1; v.z += (Math.random() - 0.5) * 0.12;
+        this.smoke.emit(p, v, { size: 0.05, grow: 0.42, life: 4.2, alpha: 0.075 + 0.05 * f });
+      }
+    }
+    // 잔연기: 스트림 끝난 뒤 1초 정도 가늘게
+    for (const st of this.streams) {
+      if (st.t > st.dur && st.t < st.dur + 1.2) {
+        if (Math.random() < dt * 14) {
+          const p = this._v.copy(cam.position).addScaledVector(cam.getWorldDirection(this._v2), 0.15);
+          p.y -= 0.06;
+          this.smoke.emit(p, this._v2.set((Math.random() - 0.5) * 0.04, 0.06, (Math.random() - 0.5) * 0.04), { size: 0.02, grow: 0.15, life: 2.2, alpha: 0.08 });
+        }
+      }
+    }
+    this.streams = this.streams.filter((st) => st.t < st.dur + 1.2);
   }
 
   enter() {
@@ -133,9 +246,20 @@ export class FirstPerson {
     if (this.controls.isLocked) this.controls.unlock();
   }
 
+  /**
+   * 포인터락: 커서를 화면 안에 가두고 마우스 이동량만 받음.
+   * - unadjustedMovement(raw input)를 먼저 시도 → OS 마우스 가속 영향 없이 일정한 감도
+   * - 사용자 제스처 안에서만 되고, 풀린 직후(~1초)엔 브라우저가 거부할 수 있음 → 실패 시 오버레이 클릭으로 재시도
+   */
   lock() {
-    // 포인터락은 사용자 제스처 안에서만 됨. 실패해도 오버레이 클릭으로 재시도 가능.
-    try { this.controls.lock(); } catch { /* noop */ }
+    const el = this.controls.domElement;
+    if (document.pointerLockElement === el) return;
+    try {
+      const p = el.requestPointerLock({ unadjustedMovement: true });
+      if (p && p.catch) p.catch(() => { try { el.requestPointerLock(); } catch { /* noop */ } });
+    } catch {
+      try { el.requestPointerLock(); } catch { /* noop */ }
+    }
   }
 
   respawn() {
@@ -168,6 +292,7 @@ export class FirstPerson {
   update(dt, { raining = false } = {}) {
     const sm = this.smoker;
     sm.update(dt, { raining });
+    this.updateEffects(dt);
     if (!this.active) return;
     const k = this.keys;
     const locked = this.controls.isLocked;
@@ -212,10 +337,52 @@ export class FirstPerson {
       THREE.MathUtils.lerp(-0.4, -0.31, t),
     );
     this.vm.rotation.set(THREE.MathUtils.lerp(0.25, 0.9, t), THREE.MathUtils.lerp(-0.5, -0.1, t), 0);
+
+    // 재 털기: 손을 재떨이 위로 → 검지로 툭(0.3s) 툭(0.45s) → 복귀
+    let ashShown = sm.state === 'lit' ? sm.ash : 0;
+    if (this.flick) {
+      const F = this.flick;
+      F.t += dt;
+      const k = F.t / F.dur;
+      const go = THREE.MathUtils.smoothstep(k, 0, 0.3) * (1 - THREE.MathUtils.smoothstep(k, 0.72, 1));
+      // 재떨이가 화면 앞쪽에 있으면 그쪽으로 손을 뻗음, 아니면 앞 아래로
+      const reach = new THREE.Vector3(0.05, -0.24, -0.42);
+      if (F.target) {
+        const L = this.cam2local(F.target.clone().setY(F.target.y + 0.22));
+        if (L.z < -0.15) reach.copy(L.setLength(Math.min(L.length(), 0.55)));
+      }
+      this.vm.position.lerp(reach, go);
+      this.vm.rotation.x = THREE.MathUtils.lerp(this.vm.rotation.x, 0.05, go);
+      const tap = (tt) => Math.exp(-Math.pow((F.t - tt) / 0.035, 2));
+      this.vm.rotation.z += (tap(0.3) + tap(0.45)) * 0.35; // 툭, 툭
+      this.vm.position.y -= (tap(0.3) + tap(0.45)) * 0.012;
+      ashShown = this.shownAsh;
+      if (F.tapped === 0 && F.t >= 0.3) {
+        F.tapped = 1;
+        this.vm.updateMatrixWorld(true);
+        this.cig.tipWorld(this._v);
+        // 재떨이 위면 재떨이 안으로 (팁이 살짝 벗어나 있어도 재떨이 쪽으로 보정)
+        const tray = F.target ? this.getContext().tray : null;
+        if (tray && Math.hypot(this._v.x - tray.x, this._v.z - tray.z) < 0.6) {
+          this._v.x = THREE.MathUtils.lerp(this._v.x, tray.x, 0.6);
+          this._v.z = THREE.MathUtils.lerp(this._v.z, tray.z, 0.6);
+        }
+        this.dropChunk(this._v, F.amount, tray);
+        this.shownAsh = 0;
+        F.data.p = this._v.clone();
+        F.outer?.('ash', F.data); // 소리·재떨이 재 쌓기·네트워크
+      }
+      if (F.t >= F.dur) this.flick = null;
+    }
+
     this.cig.setLength(sm.state === 'done' ? 0 : sm.len);
-    this.cig.setAsh(sm.state === 'lit' ? sm.ash : 0);
-    this.cig.setLit(sm.state === 'lit');
-    this.cig.emberMat.emissiveIntensity = 3 + (sm.holding ? sm.inhale * 16 : 0) + Math.sin(performance.now() * 0.013) * 0.5;
+    this.cig.setAsh(ashShown);
+    // 불 붙는 중(빨면서 불 대는 중)엔 끝이 점점 달아오름
+    const igniting = lighting && sm.igniteP > 0.25;
+    this.cig.setLit(sm.state === 'lit' || igniting);
+    this.cig.emberMat.emissiveIntensity = igniting
+      ? sm.igniteP * 10
+      : 3 + (sm.holding ? sm.inhale * 16 : 0) + Math.sin(performance.now() * 0.013) * 0.5;
 
     // 라이터: 아래에서 올라와 담배 끝에 불을 댐
     this.lightT += ((lighting ? 1 : 0) - this.lightT) * (1 - Math.exp(-10 * dt));
@@ -224,9 +391,8 @@ export class FirstPerson {
       this.vm.updateMatrixWorld(true);
       const tip = this.cam2local(this.cig.tipWorld(this._v2));
       this.lighter.group.position.set(tip.x + 0.004, THREE.MathUtils.lerp(-0.35, tip.y - 0.055, this.lightT), tip.z + 0.005);
-      const flameOn = lighting && sm.lightOkAt >= 0;
-      // 딸깍 순간에 잠깐 불꽃
-      const sparking = lighting && sm.lightOkAt < 0 && ((sm.lightT - 0.35) % 0.45) < 0.06 && sm.lightT > 0.35;
+      const flameOn = lighting && sm.flame;
+      const sparking = lighting && !sm.flame && sm.t - sm.lastStrike < 0.06; // 딸깍 순간 스파크
       this.lighter.setOn(flameOn || sparking);
       this.lighter.update(performance.now() / 1000);
     }

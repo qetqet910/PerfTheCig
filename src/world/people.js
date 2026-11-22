@@ -25,7 +25,8 @@ export const PEOPLE = [
   { x: 3.35, z: 2.55, face: [2.5, 1.8], color: '#2f4a3a', phone: true, phase: 1.3, style: NPC_STYLE({ hair: 'bun', glasses: true, pants: 0x3a3530 }) },
 ];
 
-export function createPeople(smoke, { listener } = {}) {
+const FULL = ['재떨이 꽉 찼네…', '이거 누가 좀 비워야 되는데', '재떨이 넘치겠다'];
+export function createPeople(smoke, { listener, trays = [] } = {}) {
   const group = new THREE.Group();
   const npcs = PEOPLE.map((cfg) => {
     const av = new Avatar({ color: cfg.color, smoke, phone: cfg.phone, style: cfg.style });
@@ -56,6 +57,11 @@ export function createPeople(smoke, { listener } = {}) {
       for (const n of npcs) { const d = Math.hypot(n.cfg.x - x, n.cfg.z - z); if (d < bd) { bd = d; best = n; } }
       return best;
     },
+    onTrayFull(i) {
+      const tr = trays[i];
+      const near = tr && npcs.find((n) => Math.hypot(n.cfg.x - tr.x, n.cfg.z - tr.z) < 3);
+      if (near) near.av.say(FULL[Math.floor(Math.random() * FULL.length)]);
+    },
     give(n) { n.av.say(GIVE[Math.floor(Math.random() * GIVE.length)]); },
     update(t, dt) {
       for (const n of npcs) {
@@ -73,21 +79,28 @@ export function createPeople(smoke, { listener } = {}) {
           }
           st.len -= dt / 420;
           st.ash += dt * (1 / 420 + (inhale ? 1 / 11 : 0)) * 0.085;
-          if (st.ash > 0.02 && k === 0) { // 재 털기
-            n.av.ember.getWorldPosition(_v);
+          if (st.ash > 0.02 && k === 0) { // 재떨이에 재 털기
+            const tray = trays.reduce((b, tr) => (!b || Math.hypot(tr.x - n.cfg.x, tr.z - n.cfg.z) < Math.hypot(b.x - n.cfg.x, b.z - n.cfg.z) ? tr : b), null);
+            if (tray) { _v.copy(tray.top); tray.addAsh(st.ash); } else n.av.ember.getWorldPosition(_v);
             smoke.ash(_v, st.ash);
+            sfx.tap(dist(n));
             st.ash = 0;
           }
           st.k = k;
           st.inhale = inhale;
-          if (st.len <= 0) { st.c = 0; st.k = 0; n.restUntil = t + 15 + Math.random() * 25; } // 다 폈으면 재떨이에 버리고 잠깐 쉼
+          if (st.len <= 0) { // 다 폈으면 재떨이에 비벼 끄고 잠깐 쉼
+            st.c = 0; st.k = 0; n.restUntil = t + 15 + Math.random() * 25;
+            const tray = trays.reduce((b, tr) => (!b || Math.hypot(tr.x - n.cfg.x, tr.z - n.cfg.z) < Math.hypot(b.x - n.cfg.x, b.z - n.cfg.z) ? tr : b), null);
+            tray?.addButt(undefined, undefined, true);
+          }
         } else if (st.c === 0 && t > n.restUntil) {
           st.c = 1; n.lightT = 0; n.clicked = false; st.len = 1; st.ash = 0;
         } else if (st.c === 1) {
           n.lightT += dt;
           st.flame = n.lightT > 0.5;
+          st.inhale = n.lightT > 0.7 ? 1 : 0; // 불 대고 쓰읍
           if (!n.clicked && n.lightT > 0.4) { n.clicked = true; sfx.click(true, dist(n)); }
-          if (n.lightT > 1.5) { st.c = 2; n.nextDrag = t + 1; }
+          if (n.lightT > 1.7) { st.c = 2; n.dragT = 1.8; n.nextDrag = t + 6; } // 붙자마자 첫 모금 내뱉기로 이어짐
         }
         n.av.update(dt, st);
         if (n.exhaleAt > 0 && t > n.exhaleAt) {

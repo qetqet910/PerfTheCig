@@ -8,7 +8,7 @@ import { sfx, setRain } from './fx/audio.js';
 import { createSky } from './world/sky.js';
 import { loadOsmCity } from './world/city.js';
 import { createKolon } from './world/kolon.js';
-import { createSmokingArea, nearestAshtray } from './world/smokingArea.js';
+import { createSmokingArea, nearestAshtray, SHELTER } from './world/smokingArea.js';
 import { Avatar } from './world/avatar.js';
 import { createPeople, PEOPLE } from './world/people.js';
 import { CollisionWorld } from './player/collision.js';
@@ -66,13 +66,16 @@ const area = createSmokingArea({ envMap });
 scene.add(area.group);
 
 const smoke = new SmokeSystem(3200);
+smoke.roof = SHELTER;
 scene.add(smoke.points);
 smoke.setViewport(innerHeight * renderer.getPixelRatio(), camera.fov);
 
-const people = createPeople(smoke, { listener: () => camera.position });
+const people = createPeople(smoke, { listener: () => camera.position, trays: area.trays });
 scene.add(people.group);
 
-const rain = createRain();
+// 비는 항상 옴 (가림막 아래는 안 들어옴)
+const rain = createRain(9000, { shelters: [SHELTER] });
+rain.enabled = true;
 scene.add(rain.object);
 
 const post = createPost(renderer, scene, camera);
@@ -108,7 +111,8 @@ const fp = new FirstPerson({
   getContext: () => {
     const f = fp.feet;
     const b = borrowTarget();
-    return { ashtrayDist: nearestAshtray(f.x, f.z).dist, borrowFrom: b && (b.npc ? 'npc' : b.name), _b: b };
+    const n = nearestAshtray(f.x, f.z);
+    return { ashtrayDist: n.dist, trayIdx: n.idx, tray: area.trays[n.idx], borrowFrom: b && (b.npc ? 'npc' : b.name), _b: b };
   },
   onSmokerEvent: (name, d) => {
     switch (name) {
@@ -118,6 +122,9 @@ const fp = new FirstPerson({
         break;
       case 'lit':
         office.onLit();
+        break;
+      case 'flameOut':
+        office.toast('시스템', '앗 뜨거… 라이터를 너무 오래 켜뒀다. 불 대고 좌클릭 꾹!', true);
         break;
       case 'exhale':
         sfx.exhale(d.k);
@@ -131,15 +138,26 @@ const fp = new FirstPerson({
         break;
       case 'ash':
         if (d.flicked) sfx.tap();
-        net.send({ t: 'ev', kind: 'ash', p: d.p.toArray(), k: d.amount });
+        if (d.tray !== undefined) area.trays[d.tray].addAsh(d.amount);
+        net.send({ t: 'ev', kind: 'ash', p: d.p.toArray(), k: d.amount, tray: d.tray ?? -1 });
+        break;
+      case 'tapEmpty':
+        sfx.tap();
         break;
       case 'butt':
-        if (!d.inTray) {
+        if (d.inTray) {
+          // 재떨이 흙에 비벼 끄기 → 잠깐 연기
+          const tray = area.trays[d.tray];
+          const r = tray.addButt(undefined, undefined, d.wasted > 0.02);
+          sfx.tap();
+          net.send({ t: 'ev', kind: 'butt', inTray: true, tray: d.tray, x: r.dx, z: r.dz, k: d.wasted });
+          if (tray.count === 40 || tray.count === 70) people.onTrayFull(d.tray);
+        } else {
           area.addButt(d.x, d.z);
           people.onLitter(d.x, d.z);
           office.toast('시스템', '꽁초를 바닥에 버렸습니다… 다른 사람들도 다 봐요', true);
+          net.send({ t: 'ev', kind: 'butt', inTray: false, x: d.x, z: d.z });
         }
-        net.send({ t: 'ev', kind: 'butt', x: d.x, z: d.z, inTray: d.inTray });
         office.onFinished(fp.smoker.today);
         break;
       case 'borrow': {
@@ -150,7 +168,7 @@ const fp = new FirstPerson({
         break;
       }
       case 'empty':
-        office.toast('시스템', '담배가 다 떨어졌다. 옆 사람 근처에서 G를 누르면 한 개비 빌릴 수 있어요', true);
+        office.toast('시스템', '담배가 다 떨어졌다. 옆 사람 근처에서 좌클릭하면 한 개비 빌릴 수 있어요', true);
         break;
     }
   },
@@ -208,6 +226,7 @@ const net = new Net({
   welcome: (m) => {
     m.players.forEach(addRemote);
     (m.butts || []).forEach(([x, z]) => area.addButt(x, z));
+    (m.trayButts || []).forEach(([i, x, z]) => area.trays[i]?.addButt(x, z));
     refreshOnline();
   },
   join: (m) => { addRemote(m.player); logChat(null, `${m.player.name} 님이 담배 피러 나왔습니다`); refreshOnline(); },
@@ -238,9 +257,13 @@ const net = new Net({
         if (r) r.av.mouthOUntil = r.av.clock + 1.0;
         break;
       case 'cough': r?.av.cough(); sfx.cough(dist); break;
-      case 'ash': if (m.p) smoke.ash(new THREE.Vector3(...m.p), m.k); break;
+      case 'ash':
+        if (m.p) smoke.ash(new THREE.Vector3(...m.p), m.k);
+        if (m.tray >= 0 && area.trays[m.tray]) area.trays[m.tray].addAsh(m.k);
+        break;
       case 'butt':
-        if (!m.inTray) { area.addButt(m.x, m.z); people.onLitter(m.x, m.z); }
+        if (m.inTray && area.trays[m.tray]) { area.trays[m.tray].addButt(m.x, m.z, (m.k ?? 0) > 0.02); sfx.tap(dist); }
+        else if (!m.inTray) { area.addButt(m.x, m.z); people.onLitter(m.x, m.z); }
         break;
       case 'borrow':
         if (m.to === net.id && r) {
@@ -339,10 +362,9 @@ chatInput.addEventListener('blur', () => {
 });
 
 // ---------- 단축키 ----------
-let wet = 0;
+let wet = 1;
 const actions = {
   f: () => myAvatar && setFirstPerson(!fp.active),
-  r: () => { rain.enabled = !rain.enabled; setRain(rain.enabled); btn('r').classList.toggle('on', rain.enabled); },
   o: () => { if (fp.active) return; controls.autoRotate = !controls.autoRotate; btn('o').classList.toggle('on', controls.autoRotate); },
   c: () => { if (fp.active) fp.respawn(); else { camera.position.copy(HOME.pos); controls.target.copy(HOME.target); } },
 };
@@ -381,14 +403,20 @@ function updateHud(dt) {
   // 상황별 안내
   const f = fp.feet;
   const tray = nearestAshtray(f.x, f.z).dist < 1.1;
+  const L = '<kbd>좌클릭</kbd>', R = '<kbd>우클릭</kbd>';
   let ctx = '';
-  if (sm.state === 'none') ctx = sm.pack > 0 ? '<kbd>G</kbd>담배 꺼내서 불붙이기' : borrowTarget() ? '<kbd>G</kbd>한 개비만 빌리기' : '담배가 없다… 옆 사람한테 가보자';
-  else if (sm.state === 'lighting') ctx = sm.lightOkAt >= 0 ? '불 붙는 중…' : sm.lightT > 0.9 ? '딸깍… 딸깍… (바람 때문에 잘 안 켜짐)' : '딸깍';
-  else if (sm.state === 'done') ctx = tray ? '<kbd>G</kbd>꽁초 재떨이에 버리기' : '<kbd>G</kbd>꽁초 버리기 (재떨이 근처로 가면 재떨이에)';
+  if (sm.state === 'none') ctx = sm.pack > 0 ? `${L}담배 꺼내 물기` : borrowTarget() ? `${L}한 개비만 빌리기` : '담배가 없다… 옆 사람한테 가보자';
+  else if (sm.state === 'lighting') {
+    if (!sm.flame) ctx = sm.lightTries > 1 ? '딸깍… 딸깍… (바람 때문에 잘 안 켜짐)' : '딸깍';
+    else if (sm.holding) ctx = `쓰읍… 불 붙는 중 ${Math.min(99, Math.round(sm.igniteP * 100))}%`;
+    else ctx = `${L}꾹 — 물고 빨아야 불이 붙어요`;
+  }
+  else if (sm.state === 'done') ctx = tray ? `${L}꽁초 재떨이에 비벼 끄기` : `${L}꽁초 버리기 · 재떨이 근처면 재떨이에`;
   else if (sm.t < sm.coughUntil) ctx = '콜록콜록… 너무 깊게 빨았다';
   else if (sm.holding) ctx = sm.holding === 'ring' ? '쓰읍… (떼면 도넛)' : '쓰읍…';
-  else if (sm.ash > 0.012) ctx = '<kbd>X</kbd>재 털기';
-  else if (tray && sm.len < 0.5) ctx = '<kbd>G</kbd>재떨이에 비벼 끄기';
+  else if (tray) ctx = sm.ash > 0.004 ? `${L}톡 재 털기 · ${R}톡 비벼 끄기` : `${L}꾹 빨기 · ${R}톡 비벼 끄기`;
+  else if (sm.ash > 0.012) ctx = `${L}톡 재 털기 · 재떨이 앞에서 털면 재떨이에`;
+  else ctx = `${L}꾹 빨기 · ${R}꾹 도넛`;
   if (ctx !== lastCtx) { hud.ctx.innerHTML = ctx; hud.ctx.classList.toggle('show', !!ctx); lastCtx = ctx; }
 }
 
@@ -410,13 +438,15 @@ renderer.setAnimationLoop(() => {
   const sucking = !!(sm.holding && sm.canInhale);
   if (sucking && !inhaleSound) inhaleSound = sfx.inhaleStart();
   if (!sucking && inhaleSound) { sfx.inhaleStop(inhaleSound); inhaleSound = null; }
+  // 빨 때 불씨 타닥타닥
+  if (sucking && (sm.state === 'lit' || sm.igniteP > 0.3) && Math.random() < dt * 10) sfx.crackle();
 
   if (myAvatar) {
     const st = fp.getState();
     if (!fp.active) { st.s = 0; }
     myAvatar.root.position.set(st.x, 0, st.z);
     myAvatar.root.rotation.y = st.ry;
-    myAvatar.update(dt, { speed: st.s, k: st.k, inhale: st.inh, c: st.c, len: st.len, ash: st.ash, flame: sm.lightOkAt >= 0 });
+    myAvatar.update(dt, { speed: st.s, k: st.k, inhale: st.inh, c: st.c, len: st.len, ash: st.ash, flame: sm.flame });
     net.sendState(st);
     updateHud(dt);
     office.update(dt, { smoking: sm.state === 'lit' });
@@ -431,6 +461,11 @@ renderer.setAnimationLoop(() => {
     r.av.update(dt, r.st);
   }
 
+  if (myAvatar && fp.active) {
+    const n = nearestAshtray(fp.feet.x, fp.feet.z);
+    area.trays.forEach((tr, i) => tr.setHighlight(i === n.idx && n.dist < 1.1 && fp.smoker.state !== 'none'));
+  } else area.trays.forEach((tr) => tr.setHighlight(false));
+  area.update(dt, smoke);
   people.update(t, dt);
   smoke.update(dt);
   rain.update(dt, camera);
@@ -450,4 +485,4 @@ addEventListener('resize', () => {
 });
 
 // 디버그용
-Object.assign(window, { scene, camera, controls, fp, setFirstPerson, net, remotes, people, PACK_SIZE });
+Object.assign(window, { scene, camera, controls, fp, setFirstPerson, net, remotes, people, area, PACK_SIZE });

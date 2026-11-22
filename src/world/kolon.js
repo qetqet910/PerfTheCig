@@ -61,8 +61,8 @@ export function createKolon({ pts, h = 71 }, { envMap }) {
     parent.add(mesh);
     return mesh;
   };
-  const metal = new THREE.MeshStandardMaterial({ color: 0x3b4048, metalness: 0.7, roughness: 0.4, envMap, envMapIntensity: 0.3 });
-  const stone = new THREE.MeshStandardMaterial({ color: 0x8c9096, roughness: 0.75 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0x3b4048, metalness: 0.2, roughness: 0.7 });
+  const stone = new THREE.MeshStandardMaterial({ color: 0x6a6d72, roughness: 0.95 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x5a7a8a, transparent: true, opacity: 0.22, roughness: 0.25, metalness: 0.1, envMap, envMapIntensity: 0.15, depthWrite: false, side: THREE.DoubleSide });
 
   // ---------- 통로 쪽 벽면 1층 석재 띠 ----------
@@ -135,7 +135,7 @@ export function createKolon({ pts, h = 71 }, { envMap }) {
     F(new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.55), signMat(shopSignTexture(name, color), 1.1)), -0.12, 3.1, lz, -Math.PI / 2);
   });
   // 2차 로비 입구 (금색 캐노피)
-  const gold = new THREE.MeshStandardMaterial({ color: 0xc9a24a, metalness: 0.9, roughness: 0.3, envMap, envMapIntensity: 0.8 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0x8a7038, metalness: 0.3, roughness: 0.6 });
   F(new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.35, 5.2), gold), -1.3, 4.0, 25.0);
   F(new THREE.Mesh(new THREE.PlaneGeometry(4.6, 3.6), lobbyMat(1.0)), -0.06, 1.8, 25.0, -Math.PI / 2);
   F(new THREE.Mesh(new THREE.PlaneGeometry(4.4, 0.45), signMat(textBarTexture('코오롱싸이언스밸리 2차', '#2b2416', '#e6c878'), 0.9)), -2.62, 4.0, 25.0, -Math.PI / 2);
@@ -248,15 +248,15 @@ function addPine(parent, x, y, z, s) {
 
 // ---------- materials / textures ----------
 function signMat(tex, k = 1, toneOff = false) {
-  return new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: k, roughness: 0.6, transparent: toneOff });
+  return new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: k * 0.2, roughness: 0.6, transparent: toneOff });
 }
 function lobbyMat(k = 0.9) {
-  return new THREE.MeshStandardMaterial({ color: 0x20262e, emissive: 0xffe6c4, emissiveIntensity: 0.35 * k, roughness: 0.15, metalness: 0.3 });
+  return new THREE.MeshStandardMaterial({ color: 0x14181e, emissive: 0xffe6c4, emissiveIntensity: 0.07 * k, roughness: 0.8, metalness: 0 });
 }
 
 /** 파란 유리 커튼월 + 사무실 불빛 (야근 많음) */
 function createTowerMaterial(envMap) {
-  const mat = new THREE.MeshStandardMaterial({ color: 0x2a4058, roughness: 0.3, metalness: 0.55, envMap, envMapIntensity: 0.5 });
+  const mat = new THREE.MeshStandardMaterial({ color: 0x1e2a38, roughness: 0.85, metalness: 0.0 }); // 밤: 환경 반사/스페큘러 없음
   mat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
@@ -281,9 +281,9 @@ function createTowerMaterial(envMap) {
               float mull = step(0.06, f.x) * step(f.x, 0.94) * step(0.1, f.y) * step(f.y, 0.86);
               // 층 단위로 사무실 불이 켜짐 (같은 층 옆칸끼리 비슷)
               float floorSeed = h3(vec3(floor(u / 9.6), cell.y, floor(n.x * 3.0 + n.z * 7.0 + 0.5)));
-              float lit = step(0.5, floorSeed) * step(0.15, h3(vec3(cell, 2.0)));
+              float lit = step(0.68, floorSeed) * step(0.3, h3(vec3(cell, 2.0)));
               vec3 office = vec3(0.78, 0.9, 1.0);
-              totalEmissiveRadiance += mull * lit * office * (0.55 + 0.35 * h3(vec3(cell, 5.0)));
+              totalEmissiveRadiance += mull * lit * office * (0.12 + 0.1 * h3(vec3(cell, 5.0)));
               diffuseColor.rgb = mix(vec3(0.2, 0.22, 0.25), diffuseColor.rgb, mull); // 멀리언(프레임)은 밝은 회색
             }
           }

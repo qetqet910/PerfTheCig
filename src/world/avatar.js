@@ -232,7 +232,7 @@ export class Avatar {
     this.buildHair(S.hair, M.hair, mesh, hy, color);
 
     // --- 담배 (오른손에 직접 붙임: 손 로컬 -Y = 팔 방향) ---
-    this.cigObj = createCigarette({ radius: 0.0062 });
+    this.cigObj = createCigarette({ radius: 0.0074 });
     this.cig = this.cigObj.group;
     this.cig.position.set(0.0, -0.03, 0.035);
     this.cig.rotation.x = 0.9;
@@ -449,7 +449,7 @@ export class Avatar {
       }
       this.cigObj.setLength(c === 3 ? 0 : (st.len ?? 1));
       this.cigObj.setAsh(c === 2 ? (st.ash ?? 0) : 0);
-      this.cigObj.setLit(c === 2);
+      this.cigObj.setLit(c === 2 || (lighting && (st.inhale ?? 0) > 0.5));
 
       // 왼손: 불붙이기(라이터) > 폰
       this.lighter.group.visible = lighting;

@@ -161,6 +161,11 @@ export class SmokeSystem {
       const x = this.pos[j] + vx * dt, z = this.pos[j + 2] + vz * dt;
       let y = this.pos[j + 1] + vy * dt;
       if (this.mode[i] === 1 && y < 0.04) { y = 0.04; vx = vy = vz = 0; }
+      const R = this.roof;
+      if (R && this.mode[i] === 0 && x > R.x0 && x < R.x1 && z > R.z0 && z < R.z1) {
+        const ceil = R.y - z * 0.06 - 0.12;
+        if (y > ceil) { y = ceil; vy = Math.min(vy, 0) * 0.2; vx += (Math.random() - 0.5) * 0.25 * dt; }
+      }
       this.pos[j] = x; this.pos[j + 1] = y; this.pos[j + 2] = z;
       this.vel[j] = vx; this.vel[j + 1] = vy; this.vel[j + 2] = vz;
       const k = age / life;

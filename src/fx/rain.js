@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 /** 카메라를 따라다니는 빗줄기 박스 */
-export function createRain(count = 7000) {
+export function createRain(count = 7000, { shelters = [] } = {}) {
   const R = 30, TOP = 22;
   const pos = new Float32Array(count * 6);
   const drops = new Float32Array(count * 3); // x, y, z (world)
@@ -19,6 +19,11 @@ export function createRain(count = 7000) {
     drops[i * 3 + 1] = anyY ? Math.random() * TOP : TOP + Math.random() * 4;
     speed[i] = 13 + Math.random() * 5;
   };
+  // 가림막 위에서 멈춤
+  const floorAt = (x, z) => {
+    for (const s of shelters) if (x > s.x0 && x < s.x1 && z > s.z0 && z < s.z1) return s.y + 0.05;
+    return 0;
+  };
   let init = false;
   const WIND = 1.2;
 
@@ -35,7 +40,7 @@ export function createRain(count = 7000) {
         drops[j + 1] -= speed[i] * dt;
         drops[j] += WIND * dt;
         const x = drops[j], y = drops[j + 1], z = drops[j + 2];
-        if (y < 0 || Math.abs(x - cx) > R || Math.abs(z - cz) > R) { respawn(i, cx, cz, false); }
+        if (y < floorAt(x, z) || Math.abs(x - cx) > R || Math.abs(z - cz) > R) { respawn(i, cx, cz, false); }
         const k = i * 6, len = speed[i] * 0.028;
         pos[k] = drops[j]; pos[k + 1] = drops[j + 1]; pos[k + 2] = drops[j + 2];
         pos[k + 3] = drops[j] - WIND * 0.028; pos[k + 4] = drops[j + 1] + len; pos[k + 5] = drops[j + 2];
