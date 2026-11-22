@@ -16,11 +16,11 @@ const NPC_STYLE = (o) => ({ hair: 'short', hairColor: 0x1b1512, skin: 0xffdcc2, 
 // 흡연구역 좌표 (smokingArea.js 기준). face = 바라보는 지점
 export const PEOPLE = [
   // 넥타이 맨 부장님
-  { x: -1.15, z: -0.8, face: [-2.0, -1.5], color: '#c4c9d0', phone: false, phase: 0.0, style: NPC_STYLE({ hair: 'side', glasses: true, tie: true, tieColor: 0x1d3a6b, hairColor: 0x3a3a3a }) },
+  { x: -1.15, z: -0.8, face: [-2.0, -1.5], color: '#c4c9d0', phone: false, phase: 0.0, cup: 0, style: NPC_STYLE({ hair: 'side', glasses: true, tie: true, tieColor: 0x1d3a6b, hairColor: 0x3a3a3a }) },
   // 카디건 대리 (단톡방 확인 중)
   { x: -2.7, z: -0.55, face: [-2.0, -1.5], color: '#8a6a4a', phone: true, phase: 2.7, style: NPC_STYLE({ hair: 'bob', hairColor: 0x3b2a1e, skin: 0xf6cfae }) },
   // 셔츠 신입
-  { x: 1.75, z: 1.05, face: [2.5, 1.8], color: '#a8c8e8', phone: false, phase: 5.1, style: NPC_STYLE({ hair: 'short', tie: true, tieColor: 0x8a1f2a }) },
+  { x: 1.75, z: 1.05, face: [2.5, 1.8], color: '#a8c8e8', phone: false, phase: 5.1, cup: 2, style: NPC_STYLE({ hair: 'short', tie: true, tieColor: 0x8a1f2a }) },
   // 점퍼 입은 과장님 (거래처 문자 확인)
   { x: 3.35, z: 2.55, face: [2.5, 1.8], color: '#2f4a3a', phone: true, phase: 1.3, style: NPC_STYLE({ hair: 'bun', glasses: true, pants: 0x3a3530 }) },
 ];
@@ -35,7 +35,8 @@ export function createPeople(smoke, { listener, trays = [] } = {}) {
     group.add(av.group);
     return {
       av, cfg,
-      st: { speed: 0, k: 0, inhale: 0, c: 2, len: 0.4 + Math.random() * 0.6, ash: 0 },
+      st: { speed: 0, k: 0, inhale: 0, c: 2, len: 0.4 + Math.random() * 0.6, ash: 0, it: cfg.cup !== undefined ? 1 : 0, ii: cfg.cup ?? -1, if: 0.5 + Math.random() * 0.3, sp: 0 },
+      nextSip: 6 + Math.random() * 10, sipT: -1,
       nextDrag: 2 + cfg.phase, dragT: -1, exhaleAt: -1, restUntil: 0, lightT: 0, clicked: false,
     };
   });
@@ -102,6 +103,19 @@ export function createPeople(smoke, { listener, trays = [] } = {}) {
           st.inhale = n.lightT > 0.7 ? 1 : 0; // 불 대고 쓰읍
           if (!n.clicked && n.lightT > 0.4) { n.clicked = true; sfx.click(true, dist(n)); }
           if (n.lightT > 1.7) { st.c = 2; n.dragT = 1.8; n.nextDrag = t + 6; } // 붙자마자 첫 모금 내뱉기로 이어짐
+        }
+        // 종이컵 커피 홀짝 (담배 빠는 중엔 안 마심)
+        if (st.it) {
+          if (n.sipT < 0 && t > n.nextSip && n.dragT < 0 && st.c !== 1) n.sipT = 0;
+          if (n.sipT >= 0) {
+            n.sipT += dt;
+            st.sp = n.sipT < 0.5 ? ease(n.sipT / 0.5) : n.sipT < 1.3 ? 1 : 1 - ease(Math.min(1, (n.sipT - 1.3) / 0.5));
+            if (n.sipT > 0.5 && n.sipT < 1.3) st.if = Math.max(0, st.if - dt * 0.09);
+            if (n.sipT > 1.8) {
+              n.sipT = -1; st.sp = 0; n.nextSip = t + 12 + Math.random() * 14;
+              if (st.if <= 0.01) { st.it = 0; sfx.toss(dist(n)); } // 다 마시면 분리수거
+            }
+          }
         }
         n.av.update(dt, st);
         if (n.exhaleAt > 0 && t > n.exhaleAt) {

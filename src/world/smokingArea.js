@@ -173,6 +173,11 @@ export function createSmokingArea({ envMap }) {
   };
   bench(-3.4, WALL - 0.55);
   bench(4.4, WALL - 0.55);
+  // 앉을 수 있는 자리 (벤치당 2자리). 2차 벽을 등지고 통로 쪽(-z)을 봄 → 아바타 yaw = π
+  const seats = [];
+  const benchMeshes = [];
+  group.children.slice(-2).forEach((g) => g.traverse((o) => { if (o.isMesh) benchMeshes.push(o); }));
+  for (const bx of [-3.4, 4.4]) for (const dx of [-0.45, 0.45]) seats.push({ x: bx + dx, z: WALL - 0.55, y: 0.47, yaw: Math.PI, taken: false });
 
   const doorMat = new THREE.MeshStandardMaterial({ color: 0x1a2028, metalness: 0.4, roughness: 0.3, emissive: 0x9fb8d0, emissiveIntensity: 0.04 });
   add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.3, 0.1), metal), 0.6, 1.15, WALL - 0.22);
@@ -191,29 +196,29 @@ export function createSmokingArea({ envMap }) {
   }
   boxes.push([8.1, WALL - 0.45, 1.0, 0.2, 0]);
 
-  // ---------- 1차 벽 쪽: 자판기 2대, 분리수거함, 화단 ----------
-  const vending = (x, color, label) => {
-    const v = new THREE.Group();
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.85, 0.75), new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.3 }));
-    cab.position.y = 0.925;
-    cab.castShadow = cab.receiveShadow = true;
-    const vtex = vendTexture(label);
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 1.2), new THREE.MeshStandardMaterial({ map: vtex, emissive: 0xffffff, emissiveMap: vtex, emissiveIntensity: 0.18 }));
-    front.position.set(0, 1.18, 0.376);
-    v.add(cab, front);
-    v.position.set(x, 0, -WALL + 0.42);
-    group.add(v);
-    boxes.push([x, -WALL + 0.42, 0.5, 0.375, 0]);
-  };
-  vending(-0.6, 0xb3262e, '음료');
-  vending(0.5, 0x2a4f8a, 'COFFEE');
-
-  const binMat = new THREE.MeshStandardMaterial({ color: 0x2f5e8a, roughness: 0.6 });
-  for (const [i, c] of [[0, 0x2f5e8a], [1, 0x3a7a3a], [2, 0xb08a2a]]) {
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5), new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 })), 1.6 + i * 0.55, 0.45, -WALL + 0.32);
-  }
-  boxes.push([2.15, -WALL + 0.32, 0.8, 0.25, 0]);
-  void binMat;
+  // ---------- 1차 벽 쪽: (자판기는 vending.js) 분리수거함, 화단 ----------
+  // 분리수거함 3칸: 캔·병 / 플라스틱 / 종이컵·일반 (뚜껑 투입구 + 라벨)
+  const bins = [];
+  const BIN_TYPES = [['캔·병', 0x2f5e8a, 'can'], ['플라스틱', 0x3a7a3a, 'plastic'], ['일반·종이', 0xb08a2a, 'cup']];
+  BIN_TYPES.forEach(([label, color, kind], i) => {
+    const x = 1.55 + i * 0.56, z = -WALL + 0.32;
+    const bin = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.86, 0.5), bodyMat);
+    body.position.y = 0.43;
+    body.castShadow = body.receiveShadow = true;
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.05, 0.52), new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.7), roughness: 0.5 }));
+    lid.position.y = 0.885;
+    const hole = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x070707 }));
+    hole.position.set(0, 0.912, 0.06);
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.12), new THREE.MeshStandardMaterial({ map: binLabel(label), roughness: 0.6 }));
+    tag.position.set(0, 0.68, 0.252);
+    bin.add(body, lid, hole, tag);
+    bin.position.set(x, 0, z);
+    group.add(bin);
+    bins.push({ kind, label, meshes: [body, lid, tag], top: new THREE.Vector3(x, 0.95, z + 0.06) });
+  });
+  boxes.push([2.11, -WALL + 0.32, 0.82, 0.25, 0]);
 
   const leaf = new THREE.MeshStandardMaterial({ color: 0x1f3b24, roughness: 0.9, flatShading: true });
   const planter = (x, z, len) => {
@@ -263,6 +268,13 @@ export function createSmokingArea({ envMap }) {
   const tilt = 0.06;
   const roofY = (z) => S.y - z * tilt; // z가 클수록(2차 쪽) 낮음
   const roof = new THREE.Mesh(new THREE.BoxGeometry(S.x1 - S.x0, 0.02, S.z1 - S.z0 - 0.1), roofMat);
+  // 지붕 위에 쌓이는 눈 (눈 오는 날 서서히 하얘짐)
+  const roofSnowMat = new THREE.MeshStandardMaterial({ color: 0xeef2f8, roughness: 1, transparent: true, opacity: 0, depthWrite: false });
+  const roofSnow = new THREE.Mesh(new THREE.BoxGeometry(S.x1 - S.x0, 0.03, S.z1 - S.z0 - 0.1), roofSnowMat);
+  roofSnow.position.set((S.x0 + S.x1) / 2, S.y + 0.04, 0);
+  roofSnow.rotation.x = 0.06;
+  roofSnow.renderOrder = 3;
+  group.add(roofSnow);
   roof.position.set((S.x0 + S.x1) / 2, S.y, 0);
   roof.rotation.x = tilt;
   roof.renderOrder = 2;
@@ -321,7 +333,8 @@ export function createSmokingArea({ envMap }) {
   }
 
   return {
-    group, colliders: { circles, boxes }, addButt, trays,
+    group, colliders: { circles, boxes }, addButt, trays, bins, seats, benchMeshes,
+    setSnow(k) { roofSnowMat.opacity = k * 0.92; roofSnow.visible = k > 0.01; },
     update(dt, smoke) { for (const t of trays) t.update(dt, smoke); },
   };
 }
@@ -337,6 +350,13 @@ export function nearestAshtray(x, z) {
 }
 
 // ---------- textures ----------
+function binLabel(text) {
+  return canvasTexture(256, 90, (x, w, h) => {
+    x.fillStyle = '#f4f4f0'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#222'; x.font = `800 44px ${FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(text, w / 2, h / 2 + 2);
+  });
+}
 function paverTexture() {
   return canvasTexture(256, 256, (x, w, h) => {
     x.fillStyle = '#7d7b77';
@@ -390,25 +410,5 @@ function exitTexture() {
     x.fillRect(38, 34, 14, 28);
     x.fillRect(26, 60, 12, 20);
     x.fillRect(52, 60, 12, 20);
-  });
-}
-function vendTexture(label) {
-  return canvasTexture(256, 360, (x, w, h) => {
-    x.fillStyle = '#e9eef5';
-    x.fillRect(0, 0, w, h);
-    const colors = ['#1e5bd6', '#d62f2f', '#f2c230', '#2fa15a', '#111', '#e86c1a', '#7a3fd1', '#c9c9c9'];
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 6; c++) {
-      const cx = 22 + c * 37, cy = 22 + r * 62;
-      x.fillStyle = colors[(r * 6 + c * 5 + label.length) % colors.length];
-      x.fillRect(cx - 11, cy, 22, 40);
-      x.fillStyle = '#fff';
-      x.fillRect(cx - 11, cy + 8, 22, 6);
-      x.fillStyle = '#d33';
-      x.fillRect(cx - 9, cy + 46, 18, 7);
-    }
-    x.fillStyle = '#222';
-    x.font = `700 30px ${FONT}`;
-    x.textAlign = 'center';
-    x.fillText(label, w / 2, h - 34);
   });
 }

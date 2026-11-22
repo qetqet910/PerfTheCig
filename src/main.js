@@ -16,6 +16,10 @@ import { FirstPerson } from './player/firstPerson.js';
 import { PACK_SIZE } from './smoke/smoker.js';
 import { Net } from './net/client.js';
 import { createOffice } from './office.js';
+import { createCoffeeMachine, createDrinkMachine, SNACKS } from './world/vending.js';
+import { createSnow, currentWeather } from './fx/snow.js';
+import { DEVICES, HEAT_PUFFS } from './smoke/smoker.js';
+import { TRICKS } from './smoke/tricks.js';
 
 // 씬 원점: OSM 로컬 좌표(원점 = 구로디지털단지역, m)에서 코오롱싸이언스밸리 1차·2차 사이 통로 중앙
 const ORIGIN = new THREE.Vector2(-222, 116);
@@ -63,6 +67,33 @@ scene.add(city.group);
 const kolon = createKolon(city.excluded[KOLON], { envMap });
 scene.add(kolon.group);
 const area = createSmokingArea({ envMap });
+
+// ---------- 지갑 + 자판기 (1차 벽 쪽, 통로를 바라봄) ----------
+const wallet = {
+  amount: 3000,
+  get: () => wallet.amount,
+  spend(n) { wallet.amount -= n; wallet.changed(); },
+  changed() { machines.forEach((m) => m.refreshIdle()); },
+};
+const machineCtx = (pos) => ({
+  sfx, wallet,
+  get smoke() { return smoke; }, // 연기 시스템은 아래에서 만들어짐
+  dist: () => camera.position.distanceTo(pos),
+  handsFull: () => !!fp.item,
+  give: (item) => { fp.setItem(item); onPickUp(item); },
+  toast: (t) => office.toast('시스템', t, true),
+  net: (m) => net.send(m),
+});
+const DRINK_POS = new THREE.Vector3(-0.78, 0, -6 + 0.39), COFFEE_POS = new THREE.Vector3(0.32, 0, -6 + 0.38);
+const drinkMachine = createDrinkMachine(machineCtx(DRINK_POS));
+drinkMachine.group.position.copy(DRINK_POS);
+const coffeeMachine = createCoffeeMachine(machineCtx(COFFEE_POS));
+coffeeMachine.group.position.copy(COFFEE_POS);
+const SNACK_POS = new THREE.Vector3(3.75, 0, -6 + 0.39);
+const snackMachine = createDrinkMachine(machineCtx(SNACK_POS), { products: SNACKS, title: '간식 · 핫팩', color: 0x2a6a4a, item: 'snack', no: 2 });
+snackMachine.group.position.copy(SNACK_POS);
+const machines = [coffeeMachine, drinkMachine, snackMachine]; // 네트워크 machine 번호: 0 커피, 1 음료, 2 간식
+machines.forEach((m) => scene.add(m.group));
 scene.add(area.group);
 
 const smoke = new SmokeSystem(1500); // 동시 입자 예산 (GPU 부담 때문에 이 선에서)
@@ -78,6 +109,9 @@ scene.add(people.group);
 const rain = createRain(9000, { shelters: [SHELTER] });
 rain.enabled = true;
 scene.add(rain.object);
+const snow = createSnow(2600, { shelters: [SHELTER] });
+scene.add(snow.object);
+let snowCover = 0, weatherKind = null;
 
 const post = createPost(renderer, scene, camera);
 
@@ -86,6 +120,7 @@ const world = new CollisionWorld();
 world.add(city.colliders);
 world.add(kolon.colliders);
 world.add(area.colliders);
+world.add({ boxes: [[COFFEE_POS.x, COFFEE_POS.z, ...coffeeMachine.collider, 0], [DRINK_POS.x, DRINK_POS.z, ...drinkMachine.collider, 0], [SNACK_POS.x, SNACK_POS.z, ...snackMachine.collider, 0]] });
 world.add({ circles: PEOPLE.map((p) => [p.x, p.z, 0.4]) });
 
 // ---------- HUD 헬퍼 ----------
@@ -107,6 +142,27 @@ function borrowTarget() {
 
 const fp = new FirstPerson({
   camera, dom: renderer.domElement, world, smoke, scene,
+  onTrick: (phase, i) => {
+    if (phase === 'start') { inhaleOneShot = 0.9; return; }
+    sfx.exhale(0.8);
+    net.send({ t: 'ev', kind: 'trick', idx: i, device: fp.smoker.device });
+    if (!trickSeen.has(i)) { trickSeen.add(i); office.toast('시스템', `묘기: ${TRICKS[i].name}`, true); }
+  },
+  onSit: (on) => { sfx.sit(); if (on) office.toast('시스템', '앉았다. 움직이면(WASD) 일어남', true); },
+  onItemEvent: (name, it) => {
+    if (name === 'cap') sfx.press();
+    else if (name === 'rustle') sfx.rustle();
+    else if (name === 'bite') sfx.crunch();
+    else if (name === 'warm') { sfx.shake(); if (!it.warmed) { it.warmed = true; office.toast('시스템', weatherKind === 'snow' ? '눈 오는 날 핫팩은 진리. 손이 따뜻하다' : '손이 따뜻하다', true); } }
+    else if (name === 'gum') office.toast('시스템', '담배 냄새가 좀 가셨다 (아마도)', true);
+    else if (name === 'mask') office.toast('시스템', '마스크를 썼다… 담배는 어떻게 피우지', true);
+    else if (name === 'wipe') office.toast('시스템', '손 닦았다. 담배 냄새는 그대로', true);
+    else if (name === 'open') sfx.canOpen();
+    else if (name === 'slurp') sfx.slurp();
+    else if (name === 'gulp') sfx.gulp();
+    else if (name === 'hot') office.toast('시스템', '앗 뜨거… 좀 식혀서 마시자', true);
+    else if (name === 'empty') office.toast('시스템', `${it.type === 'cup' ? '종이컵' : it.drink.name} 다 ${it.type === 'snack' ? '먹었다' : '마셨다'}. 분리수거함에 버리자`, true);
+  },
   onLockChange: (locked) => document.body.classList.toggle('paused', fp.active && !locked && !chatOpen()),
   getContext: () => {
     const f = fp.feet;
@@ -123,13 +179,41 @@ const fp = new FirstPerson({
       case 'lit':
         office.onLit();
         break;
+      case 'insert':
+        sfx.press();
+        office.toast('시스템', '스틱 꽂고 예열 중… (징- 하면 준비)', true);
+        break;
+      case 'ready':
+        sfx.heatReady();
+        office.onLit();
+        break;
+      case 'heatEnd':
+        sfx.heatReady();
+        office.toast('시스템', '스틱 다 폈다 (징징). 빼서 버리자', true);
+        break;
+      case 'vapeOn':
+        sfx.press();
+        break;
+      case 'vapeOff':
+        sfx.press();
+        break;
+      case 'liquidEmpty':
+        office.toast('시스템', '액상이 다 떨어졌다. 좌클릭으로 채우기', true);
+        break;
+      case 'refill':
+        sfx.press();
+        office.toast('시스템', '액상 채웠다', true);
+        break;
+      case 'device':
+        office.toast('시스템', `${DEVICES[d.device].name}(으)로 바꿨다`, true);
+        break;
       case 'flameOut':
         office.toast('시스템', '앗 뜨거… 라이터를 너무 오래 켜뒀다. 불 대고 좌클릭 꾹!', true);
         break;
       case 'exhale':
         sfx.exhale(d.k);
         if (d.type === 'ring') net.send({ t: 'ev', kind: 'ring', p: d.p.toArray(), d: d.d.toArray(), k: d.k });
-        else net.send({ t: 'puff', p: d.p.toArray(), d: d.d.toArray(), k: d.k, v: d.v, nose: !!d.nose });
+        else net.send({ t: 'puff', p: d.p.toArray(), d: d.d.toArray(), k: d.k, v: d.v, nose: !!d.nose, device: d.device });
         break;
       case 'cough':
         sfx.cough();
@@ -207,7 +291,7 @@ function addRemote(p) {
   av.root.position.set(p.x, 0, p.z);
   av.root.rotation.y = p.ry;
   scene.add(av.group);
-  remotes.set(p.id, { av, name: p.name, tx: p.x, tz: p.z, try: p.ry, st: { speed: p.s, k: p.k, inhale: p.inh, c: p.c, len: p.len, ash: p.ash } });
+  remotes.set(p.id, { av, name: p.name, tx: p.x, tz: p.z, try: p.ry, st: { speed: p.s, k: p.k, inhale: p.inh, c: p.c, len: p.len, ash: p.ash, it: p.it, ii: p.ii, if: p.if, sp: p.sp, si: p.si, dv: p.dv, lq: p.lq } });
 }
 function removeRemote(id) {
   const r = remotes.get(id);
@@ -234,17 +318,22 @@ const net = new Net({
     const r = remotes.get(m.id);
     if (!r) return;
     Object.assign(r, { tx: m.x, tz: m.z, try: m.ry });
-    Object.assign(r.st, { speed: m.s, k: m.k, inhale: m.inh, c: m.c, len: m.len, ash: m.ash });
+    Object.assign(r.st, { speed: m.s, k: m.k, inhale: m.inh, c: m.c, len: m.len, ash: m.ash, it: m.it, ii: m.ii, if: m.if, sp: m.sp, si: m.si, dv: m.dv, lq: m.lq });
   },
   puff: (m) => {
     const r = remotes.get(m.id);
-    if (r) { r.av.exhale(m.v ?? 0.5, !!m.nose); sfx.exhale(m.k, remoteDist(r)); }
+    if (r) { r.av.exhale(m.v ?? 0.5, !!m.nose, m.device && m.device !== 'cig' ? m.device : 'smoke'); sfx.exhale(m.k, remoteDist(r)); }
     else smoke.puff(new THREE.Vector3(...m.p), new THREE.Vector3(...m.d), m.k);
   },
   ev: (m) => {
     const r = remotes.get(m.id);
     const dist = r ? remoteDist(r) : 20;
     switch (m.kind) {
+      case 'vend': machines[m.machine]?.remoteVend(m.idx); break;
+      case 'take': machines[m.machine]?.remoteTake(); break;
+      case 'kick': machines[m.machine]?.remoteKick(); break;
+      case 'toss': sfx.toss(dist); break;
+      case 'trick': if (r) { r.av.trick(m.idx, m.device && m.device !== 'cig' ? m.device : 'smoke'); sfx.exhale(0.8, dist); } break;
       case 'click': sfx.click(!!m.k, dist); break;
       case 'ring':
         smoke.ring(new THREE.Vector3(...m.p), new THREE.Vector3(...m.d), m.k);
@@ -276,6 +365,11 @@ const net = new Net({
     r.av.say(m.text);
     logChat(r.name, m.text);
   },
+  denied: (m) => {
+    document.body.classList.add('denied');
+    $('deniedMsg').textContent = `이 브라우저에서 이미 창 ${m.max}개로 접속 중이에요. 다른 창을 닫고 새로고침해 주세요.`;
+    fp.exit();
+  },
   status: refreshOnline,
   reset: () => { for (const id of [...remotes.keys()]) removeRemote(id); refreshOnline(); },
 });
@@ -306,7 +400,18 @@ function join() {
   net.connect(profile.name, profile.color);
   document.body.classList.add('joined');
   office.start(profile.name);
+  fp.smoker.setDevice(profile.device || 'cig');
   enterFirstPerson();
+}
+// 담배 종류 선택
+const devEl = $('devices');
+profile.device ||= 'cig';
+for (const [key, d] of Object.entries(DEVICES)) {
+  const b = document.createElement('button');
+  b.textContent = d.name;
+  b.className = key === profile.device ? 'sel' : '';
+  b.addEventListener('click', () => { profile.device = key; devEl.querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b)); });
+  devEl.appendChild(b);
 }
 $('enter').addEventListener('click', join);
 nickEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); join(); } });
@@ -360,6 +465,12 @@ let wet = 1;
 addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement || e.repeat) return;
   if (e.key === 'Enter') { e.preventDefault(); openChat(); }
+  if (e.code === 'KeyT' && fp.active) {
+    const order = ['cig', 'heat', 'vape'];
+    const next = order[(order.indexOf(fp.smoker.device) + 1) % 3];
+    if (!fp.smoker.setDevice(next)) office.toast('시스템', '손에 든 거 먼저 정리하고 바꾸자', true);
+    else { profile.device = next; localStorage.setItem('gvalley.profile', JSON.stringify(profile)); }
+  }
 });
 
 const tickClock = () => {
@@ -371,14 +482,16 @@ setInterval(tickClock, 10_000);
 $('loading').classList.add('done');
 
 // ---------- 흡연 HUD ----------
-const hud = { pack: $('packCount'), today: $('todayCount'), paper: $('cigPaper'), ash: $('cigAsh'), bar: document.querySelector('.cigbar'), away: $('away'), ctx: $('ctxHint') };
+const hud = { dev: $('deviceName'), tricks: $('tricks'), wallet: $('wallet'), pack: $('packCount'), today: $('todayCount'), paper: $('cigPaper'), ash: $('cigAsh'), bar: document.querySelector('.cigbar'), away: $('away'), ctx: $('ctxHint') };
 let hudAcc = 0, lastCtx = '';
 function updateHud(dt) {
   hudAcc += dt;
   if (hudAcc < 0.1) return;
   hudAcc = 0;
   const sm = fp.smoker;
-  hud.pack.textContent = sm.pack;
+  hud.pack.textContent = sm.device === 'vape' ? `액상 ${Math.round(sm.liquid * 100)}%` : `${sm.pack}/20`;
+  hud.dev.textContent = DEVICES[sm.device].name + (sm.device === 'heat' && sm.state === 'lit' ? ` · ${sm.puffs}/${HEAT_PUFFS}모금` : '');
+  hud.tricks.classList.toggle('show', sm.state === 'lit' && fp.active);
   hud.today.textContent = sm.today;
   const has = sm.state !== 'none';
   hud.bar.classList.toggle('none', !has);
@@ -386,13 +499,24 @@ function updateHud(dt) {
   hud.paper.classList.toggle('lit', sm.state === 'lit');
   hud.ash.style.width = `${Math.min(8, (sm.ash / 0.024) * 8)}%`;
   hud.away.textContent = office.awayText();
+  hud.wallet.textContent = wallet.amount.toLocaleString('ko-KR');
 
   // 상황별 안내
   const f = fp.feet;
   const tray = nearestAshtray(f.x, f.z).dist < 1.1;
   const L = '<kbd>좌클릭</kbd>', R = '<kbd>우클릭</kbd>';
   let ctx = '';
-  if (sm.state === 'none') ctx = sm.pack > 0 ? `${L}담배 꺼내 물기` : borrowTarget() ? `${L}한 개비만 빌리기` : '담배가 없다… 옆 사람한테 가보자';
+  const dev = sm.device;
+  if (fp.seat && !sm.holding) ctx = '<kbd>WASD</kbd>일어나기';
+  if (ctx) { /* 앉아 있음 */ }
+  else if (dev === 'vape' && sm.state === 'none') ctx = `${L}전자담배 꺼내기`;
+  else if (dev === 'vape' && sm.state === 'done') ctx = `${L}액상 채우기`;
+  else if (dev === 'vape' && sm.state === 'lit' && !sm.holding && sm.t >= sm.coughUntil) ctx = `${L}꾹 빨기 · ${R}꾹 도넛 · ${R}톡 넣기`;
+  else if (dev === 'heat' && sm.state === 'none') ctx = sm.pack > 0 ? `${L}스틱 꽂기` : borrowTarget() ? `${L}스틱 하나만 빌리기` : '스틱이 없다…';
+  else if (dev === 'heat' && sm.state === 'lighting') ctx = `예열 중… ${Math.max(0, Math.ceil(6 - sm.heatT))}초`;
+  else if (dev === 'heat' && sm.state === 'done') ctx = tray ? `${L}스틱 빼서 재떨이에` : `${L}스틱 빼서 버리기`;
+  else if (dev === 'heat' && sm.state === 'lit' && !sm.holding && sm.t >= sm.coughUntil) ctx = `${L}꾹 빨기 · ${R}꾹 도넛 · ${R}톡 스틱 빼기`;
+  else if (sm.state === 'none') ctx = sm.pack > 0 ? `${L}담배 꺼내 물기` : borrowTarget() ? `${L}한 개비만 빌리기` : '담배가 없다… 옆 사람한테 가보자';
   else if (sm.state === 'lighting') {
     if (!sm.flame) ctx = sm.lightTries > 1 ? '딸깍… 딸깍… (바람 때문에 잘 안 켜짐)' : '딸깍';
     else if (sm.holding) ctx = `쓰읍… 불 붙는 중 ${Math.min(99, Math.round(sm.igniteP * 100))}%`;
@@ -404,11 +528,84 @@ function updateHud(dt) {
   else if (tray) ctx = sm.ash > 0.004 ? `${L}톡 재 털기 · ${R}톡 비벼 끄기` : `${L}꾹 빨기 · ${R}톡 비벼 끄기`;
   else if (sm.ash > 0.012) ctx = `${L}톡 재 털기 · 재떨이 앞에서 털면 재떨이에`;
   else ctx = `${L}꾹 빨기 · ${R}꾹 도넛`;
+  // 음료 들고 있으면 마시기 안내 덧붙임
+  if (fp.item && fp.item.fill > 0.005 && !sm.holding) ctx += `${ctx ? ' · ' : ''}<kbd>휠↑</kbd>마시기`;
+  // 조준 중인 대상(자판기·쓰레기통)이 있으면 그 안내가 우선
+  if (aimLabel) ctx = aimLabel.includes('좌클릭') ? `${L}${aimLabel.replace(' · 좌클릭', '')}` : aimLabel;
   if (ctx !== lastCtx) { hud.ctx.innerHTML = ctx; hud.ctx.classList.toggle('show', !!ctx); lastCtx = ctx; }
 }
 
+// ---------- 조준 상호작용 (화면 가운데 점) ----------
+const raycaster = new THREE.Raycaster();
+raycaster.far = 1.7;
+const CENTER = new THREE.Vector2(0, 0);
+let aimLabel = null;
+// 분리수거함
+for (const bin of area.bins) {
+  for (const mesh of bin.meshes) {
+    mesh.userData.interact = {
+      label: () => {
+        const it = fp.item;
+        if (!it) return null;
+        const what = it.type === 'cup' ? '종이컵' : it.type === 'snack' ? `${it.drink.name} 봉지` : it.drink.name;
+        const right = binRight(it, bin);
+        return `${what} ${it.fill > 0.02 ? '(남은 거) ' : ''}${bin.label}에 버리기${right ? '' : ' (어… 여기 맞나?)'} · 좌클릭`;
+      },
+      click: () => tossInto(bin),
+    };
+  }
+}
+/** 맞는 분리수거함인지: 종이컵·간식봉지 → 일반, 캔 → 캔, 병 → 플라스틱 */
+function binRight(it, bin) {
+  if (it.type === 'cup' || (it.type === 'snack' && !['can', 'bottle'].includes(it.drink.kind))) return bin.kind === 'cup';
+  return bin.kind === (it.drink.kind === 'bottle' ? 'plastic' : 'can');
+}
+// 벤치: 앉기
+for (const mesh of area.benchMeshes) {
+  mesh.userData.interact = {
+    label: () => {
+      if (fp.seat) return null;
+      const free = area.seats.filter((s) => !s.taken);
+      return free.length ? '벤치에 앉기 · 좌클릭' : '자리가 없다';
+    },
+    click: () => {
+      const free = area.seats.filter((s) => !s.taken).sort((a, b) => Math.hypot(a.x - fp.feet.x, a.z - fp.feet.z) - Math.hypot(b.x - fp.feet.x, b.z - fp.feet.z));
+      if (free[0]) fp.sit(free[0]);
+    },
+  };
+}
+const aimTargets = [...machines.flatMap((m) => m.interactables), ...area.bins.flatMap((b) => b.meshes), ...area.benchMeshes];
+function updateAim() {
+  aimLabel = null;
+  fp.interact = null;
+  if (!fp.active || !fp.isLocked) { document.body.classList.remove('aiming'); return; }
+  raycaster.setFromCamera(CENTER, camera);
+  const hits = raycaster.intersectObjects(aimTargets, false);
+  for (const h of hits) {
+    const it = h.object.userData.interact;
+    const label = it?.label();
+    if (label) { aimLabel = label; if (label.includes('좌클릭')) fp.interact = it; break; }
+  }
+  document.body.classList.toggle('aiming', !!fp.interact);
+}
+function tossInto(bin) {
+  const it = fp.item;
+  if (!it) return;
+  const right = binRight(it, bin);
+  fp.setItem(null);
+  sfx.toss();
+  net.send({ t: 'ev', kind: 'toss' });
+  office.toast('시스템', right ? '골인. 분리수거 완료' : '골인… 근데 분리수거는 제대로 하자', true);
+  if (it.fill > 0.3) office.toast('시스템', '반도 안 마시고 버렸다', true);
+}
+let comboShown = false;
+function onPickUp(item) {
+  office.toast('시스템', item.type === 'cup' ? `${item.name} 한 잔. 휠↑로 홀짝` : `${item.drink.name} 하나. 휠↑로 마시기`, true);
+}
+
 // 빨기 소리 (누르는 동안)
-let inhaleSound = null;
+let inhaleSound = null, inhaleOneShot = 0, breathT = 2;
+const trickSeen = new Set();
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
@@ -417,23 +614,52 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
+  // 날씨: 모든 접속자 같은 날씨 (10분마다 비 ↔ 눈)
+  const W = currentWeather();
+  if (W.kind !== weatherKind) {
+    if (weatherKind) office.toast('시스템', W.kind === 'snow' ? '눈이 오기 시작했다' : '눈이 비로 바뀌었다', true);
+    weatherKind = W.kind;
+    rain.enabled = W.kind === 'rain';
+    setRain(rain.enabled);
+    $('weather').textContent = W.kind === 'snow' ? '눈' : '비';
+  }
+  snow.level = THREE.MathUtils.clamp(snow.level + (W.kind === 'snow' ? dt / 8 : -dt / 8), 0, 1);
+  snowCover = THREE.MathUtils.clamp(snowCover + (W.kind === 'snow' ? dt / 90 : -dt / 150), 0, 1);
   wet = THREE.MathUtils.clamp(wet + (rain.enabled ? dt / 6 : -dt / 20), 0, 1);
-  city.setWetness(wet);
+  city.setWetness(wet, snowCover);
+  kolon.setSnow(snowCover);
+  area.setSnow(snowCover);
+  snow.update(dt, camera);
+  // 눈 오는 날 입김 (NPC·다른 사람·나)
+  if (W.kind === 'snow' && snow.level > 0.5) {
+    breathT -= dt;
+    if (breathT < 0) {
+      breathT = 0.9 + Math.random() * 0.9;
+      const who = [...people.npcs.map((n) => n.av), ...[...remotes.values()].map((r) => r.av)];
+      const av = who[Math.floor(Math.random() * (who.length + 1))];
+      if (av) av.exhale(0.06, false, 'heat');
+      else if (fp.active && !fp.smoker.holding) smoke.exhale(() => fp.mouthOrigin(), 0.05, { vapor: 'heat' });
+    }
+  }
+  // 벤치 자리: 다른 사람이 앉은 자리는 막기
+  for (const seat of area.seats) seat.taken = fp.seat === seat || [...remotes.values()].some((r) => r.st.si && Math.hypot(r.tx - seat.x, r.tz - seat.z) < 0.3);
 
   fp.update(dt, { raining: rain.enabled });
   const sm = fp.smoker;
   const sucking = !!(sm.holding && sm.canInhale);
-  if (sucking && !inhaleSound) inhaleSound = sfx.inhaleStart();
-  if (!sucking && inhaleSound) { sfx.inhaleStop(inhaleSound); inhaleSound = null; }
+  if (inhaleOneShot > 0) { inhaleOneShot -= dt; } // 묘기 빨아들이는 소리
+  const suckSound = sucking || inhaleOneShot > 0;
+  if (suckSound && !inhaleSound) inhaleSound = sm.device === 'vape' ? sfx.vapeStart() : sfx.inhaleStart();
+  if (!suckSound && inhaleSound) { sfx.inhaleStop(inhaleSound); inhaleSound = null; }
   // 빨 때 불씨 타닥타닥
-  if (sucking && (sm.state === 'lit' || sm.igniteP > 0.3) && Math.random() < dt * 10) sfx.crackle();
+  if (sucking && sm.device === 'cig' && (sm.state === 'lit' || sm.igniteP > 0.3) && Math.random() < dt * 10) sfx.crackle();
 
   if (myAvatar) {
     const st = fp.getState();
     if (!fp.active) { st.s = 0; }
     myAvatar.root.position.set(st.x, 0, st.z);
     myAvatar.root.rotation.y = st.ry;
-    myAvatar.update(dt, { speed: st.s, k: st.k, inhale: st.inh, c: st.c, len: st.len, ash: st.ash, flame: sm.flame });
+    myAvatar.update(dt, { speed: st.s, k: st.k, inhale: st.inh, c: st.c, len: st.len, ash: st.ash, flame: sm.flame, it: st.it, ii: st.ii, if: st.if, sp: st.sp, si: st.si, dv: st.dv, lq: st.lq });
     net.sendState(st);
     updateHud(dt);
     office.update(dt, { smoking: sm.state === 'lit' });
@@ -453,6 +679,9 @@ renderer.setAnimationLoop(() => {
     area.trays.forEach((tr, i) => tr.setHighlight(i === n.idx && n.dist < 1.1 && fp.smoker.state !== 'none'));
   } else area.trays.forEach((tr) => tr.setHighlight(false));
   area.update(dt, smoke);
+  machines.forEach((m) => m.update(dt));
+  if (!comboShown && fp.item?.type === 'cup' && fp.smoker.state === 'lit') { comboShown = true; office.toast('시스템', '커피 한 잔 + 담배 한 대. 직장인 세트 완성', true); }
+  updateAim();
   people.update(t, dt);
   smoke.update(dt);
   rain.update(dt, camera);
@@ -472,4 +701,4 @@ addEventListener('resize', () => {
 });
 
 // 디버그용
-Object.assign(window, { scene, camera, controls, fp, enterFirstPerson, net, remotes, people, area, smoke, PACK_SIZE });
+Object.assign(window, { scene, camera, controls, fp, enterFirstPerson, net, remotes, people, area, smoke, machines, wallet, PACK_SIZE });

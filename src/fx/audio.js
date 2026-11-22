@@ -116,6 +116,108 @@ export const sfx = {
     tone({ freq: 1318, dur: 0.18, gain: 0.12 });
     tone({ freq: 1760, dur: 0.25, gain: 0.1, at: 0.09 });
   },
+  // ---------- 자판기 / 음료 ----------
+  /** 동전 딸랑 */
+  coin(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    const f = 2600 + Math.random() * 900;
+    tone({ freq: f, dur: 0.18, type: 'sine', gain: 0.06, out });
+    tone({ freq: f * 1.51, dur: 0.12, type: 'sine', gain: 0.03, at: 0.01, out });
+    noise({ dur: 0.04, type: 'bandpass', freq: 4000, q: 2, gain: 0.08, at: 0.12, out });
+  },
+  /** 종이컵 톡 떨어짐 */
+  cupDrop(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    tone({ freq: 420, dur: 0.08, type: 'triangle', gain: 0.07, slide: 0.7, out });
+    noise({ dur: 0.05, type: 'bandpass', freq: 1200, q: 1.5, gain: 0.1, out });
+  },
+  /** 지이잉 (모터 + 믹서) — 핸들 반환, stop(h)로 끔 */
+  whirr(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return null;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(70, t0);
+    o.frequency.linearRampToValueAtTime(118, t0 + 0.4);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 11;
+    const lfoG = ctx.createGain();
+    lfoG.gain.value = 6;
+    lfo.connect(lfoG).connect(o.frequency);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 520;
+    f.Q.value = 1.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.05, t0 + 0.25);
+    o.connect(f).connect(g).connect(out);
+    const n = noise({ dur: 30, type: 'bandpass', freq: 2400, q: 0.8, gain: 0.012, attack: 0.3, out });
+    o.start(t0); lfo.start(t0);
+    return { stop() {
+      const t = ctx.currentTime;
+      g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + 0.25);
+      if (n) { n.g.gain.cancelScheduledValues(t); n.g.gain.setValueAtTime(n.g.gain.value, t); n.g.gain.linearRampToValueAtTime(0.0001, t + 0.2); }
+      o.frequency.linearRampToValueAtTime(50, t + 0.25);
+      o.stop(t + 0.3); lfo.stop(t + 0.3);
+    } };
+  },
+  /** 쪼르륵 (커피 내려옴) — 핸들 반환 */
+  pour(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return null;
+    const n = noise({ dur: 30, type: 'bandpass', freq: 900, q: 3, gain: 0.04, attack: 0.15, out });
+    if (!n) return null;
+    // 보글보글: 필터 주파수를 랜덤하게 흔듦
+    const id = setInterval(() => { if (ctx) n.f.frequency.setTargetAtTime(650 + Math.random() * 700, ctx.currentTime, 0.02); }, 45);
+    return { stop() { clearInterval(id); const t = ctx.currentTime; n.g.gain.cancelScheduledValues(t); n.g.gain.setValueAtTime(n.g.gain.value, t); n.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15); } };
+  },
+  /** 삐-삐 (완료) */
+  beep(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    tone({ freq: 1760, dur: 0.12, type: 'square', gain: 0.025, out });
+    tone({ freq: 1760, dur: 0.12, type: 'square', gain: 0.025, at: 0.2, out });
+  },
+  /** 버튼 딸깍 */
+  press(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    noise({ dur: 0.02, type: 'highpass', freq: 3000, gain: 0.12, out });
+  },
+  /** 캔 덜컹 */
+  canDrop(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    tone({ freq: 120, dur: 0.18, type: 'sine', gain: 0.18, slide: 0.6, out });
+    noise({ dur: 0.12, type: 'bandpass', freq: 700, q: 1, gain: 0.15, out });
+    tone({ freq: 140, dur: 0.12, type: 'sine', gain: 0.1, at: 0.22, slide: 0.7, out });
+    tone({ freq: 1900, dur: 0.25, type: 'triangle', gain: 0.02, at: 0.02, out });
+  },
+  /** 치익 (캔 따기) */
+  canOpen(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    noise({ dur: 0.02, type: 'highpass', freq: 2000, gain: 0.2, out });
+    noise({ dur: 0.45, type: 'highpass', freq: 5000, gain: 0.07, attack: 0.01, at: 0.02, out });
+  },
+  /** 후루룩 (한 모금) */
+  slurp() {
+    const n = noise({ dur: 0.35, type: 'bandpass', freq: 1300, q: 2.5, gain: 0.05, attack: 0.04 });
+    if (n) n.f.frequency.exponentialRampToValueAtTime(600, n.t0 + 0.3);
+  },
+  /** 꿀꺽 */
+  gulp() {
+    tone({ freq: 260, dur: 0.09, type: 'sine', gain: 0.08, slide: 1.6 });
+  },
+  /** 쾅 (자판기 치기) */
+  bang(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    tone({ freq: 70, dur: 0.3, type: 'sine', gain: 0.25, slide: 0.6, out });
+    noise({ dur: 0.2, type: 'lowpass', freq: 900, gain: 0.2, out });
+    tone({ freq: 380, dur: 0.4, type: 'triangle', gain: 0.03, at: 0.01, out });
+  },
+  /** 쓰레기통에 툭 */
+  toss(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    noise({ dur: 0.08, type: 'bandpass', freq: 900, q: 1.2, gain: 0.12, at: 0.35, out });
+    tone({ freq: 200, dur: 0.1, type: 'sine', gain: 0.06, at: 0.35, slide: 0.7, out });
+  },
   /** 빨 때 불씨가 타들어가는 타닥 소리 */
   crackle() {
     noise({ dur: 0.012 + Math.random() * 0.015, type: "highpass", freq: 2500 + Math.random() * 2500, gain: 0.05 + Math.random() * 0.06 });
@@ -257,3 +359,22 @@ export function setRain(on) {
   if (!ambience) return;
   ambience.rainBus.gain.setTargetAtTime(on ? RAIN_LEVEL : 0, ctx.currentTime, 1.2);
 }
+
+// ---------- 전자담배 / 기타 ----------
+Object.assign(sfx, {
+  /** 궐련형 준비 완료 징- */
+  heatReady() { tone({ freq: 160, dur: 0.18, type: 'sawtooth', gain: 0.04 }); tone({ freq: 160, dur: 0.18, type: 'sawtooth', gain: 0.04, at: 0.25 }); },
+  /** 액상 코일 지글지글 (빠는 동안) — 핸들 반환 */
+  vapeStart() {
+    if (!ensure()) return null;
+    return noise({ dur: 6, type: 'bandpass', freq: 3200, q: 0.9, gain: 0.05, attack: 0.05 });
+  },
+  /** 바스락 (과자 봉지) */
+  rustle() { noise({ dur: 0.25, type: 'highpass', freq: 3500, gain: 0.08, attack: 0.01 }); noise({ dur: 0.2, type: 'highpass', freq: 5000, gain: 0.05, at: 0.12 }); },
+  /** 와그작 (한 입) */
+  crunch() { for (let i = 0; i < 3; i++) noise({ dur: 0.04, type: 'bandpass', freq: 1800 + Math.random() * 1500, q: 1.2, gain: 0.12, at: i * 0.06 }); },
+  /** 핫팩 흔들기 사각사각 */
+  shake() { for (let i = 0; i < 4; i++) noise({ dur: 0.06, type: 'bandpass', freq: 2500, q: 1, gain: 0.05, at: i * 0.11 }); },
+  /** 앉기 (벤치 삐걱) */
+  sit() { tone({ freq: 210, dur: 0.25, type: 'triangle', gain: 0.04, slide: 0.8 }); noise({ dur: 0.1, type: 'lowpass', freq: 600, gain: 0.08 }); },
+});

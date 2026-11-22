@@ -39,6 +39,11 @@ export class SmokeSystem {
     this.time = 0;
     this.streams = [];
     this.roof = null;
+    // 묘기용: 입자를 움직이는 목표(입/코)로 빨아들임
+    this.attractId = new Int16Array(max).fill(-1);
+    this.attractDelay = new Float32Array(max);
+    this.targets = new Array(16).fill(null);
+    this.targetCursor = 0;
 
     const g = new THREE.BufferGeometry();
     const dyn = (arr, n) => new THREE.BufferAttribute(arr, n).setUsage(THREE.DynamicDrawUsage);
@@ -128,7 +133,7 @@ export class SmokeSystem {
     list.slice(0, 2).forEach((p, i) => this.material.uniforms.uLampPos.value[i].copy(p));
   }
 
-  emit(p, v, { size = 0.05, grow = 0.35, life = 4, alpha = 0.35, turb = 1, mode = 0, tint = 0 } = {}) {
+  emit(p, v, { size = 0.05, grow = 0.35, life = 4, alpha = 0.35, turb = 1, mode = 0, tint = 0, attract = -1, delay = 0 } = {}) {
     const i = this.cursor;
     this.cursor = (this.cursor + 1) % this.max;
     this.pos.set([p.x, p.y, p.z], i * 3);
@@ -141,6 +146,42 @@ export class SmokeSystem {
     this.turb[i] = turb;
     this.mode[i] = mode;
     this.tint[i] = tint;
+    this.attractId[i] = attract;
+    this.attractDelay[i] = delay;
+    return i;
+  }
+
+  /** 움직이는 목표 등록 (fn: () => Vector3). 반환된 번호를 emit({ attract })에 넘김 */
+  addTarget(fn) {
+    const k = this.targetCursor;
+    this.targetCursor = (k + 1) % this.targets.length;
+    this.targets[k] = fn;
+    return k;
+  }
+
+  // ---------------- 묘기 ----------------
+  /** 고스트: 연기 덩어리를 천천히 내뱉었다가 다시 빨아들임 */
+  ghost(origin, v = 0.7) {
+    const { p, d } = origin();
+    const tgt = this.addTarget(() => origin().p);
+    const vel = new THREE.Vector3();
+    const n = Math.round(30 + 30 * v);
+    for (let k = 0; k < n; k++) {
+      vel.copy(d).multiplyScalar(0.28 + Math.random() * 0.12);
+      vel.x += (Math.random() - 0.5) * 0.08; vel.y += (Math.random() - 0.5) * 0.06; vel.z += (Math.random() - 0.5) * 0.08;
+      this.emit(p, vel, { size: 0.05, grow: 0.12, life: 3, alpha: 0.1 + 0.05 * v, turb: 0.15, mode: MODE.BREATH, tint: 1, attract: tgt, delay: 0.85 + Math.random() * 0.15 });
+    }
+  }
+
+  /** 프렌치 인헤일: 입에서 흘러나온 연기가 위로 말려 코로 들어감 */
+  french(origin, dur = 1.3) {
+    const nose = this.addTarget(() => { const o = origin(); return o.p.clone().addScaledVector(o.d, 0.005).add(new THREE.Vector3(0, 0.04, 0)); });
+    this.streams.push({ french: true, origin, nose, t: 0, dur, acc: 0, v: 0.5, linger: 0 });
+  }
+
+  /** 용 콧김: 코로 두 줄기 세게 */
+  noseJets(origin, v = 0.8) {
+    this.streams.push({ jets: true, origin, t: 0, dur: 0.5 + v * 0.7, acc: 0, v, linger: 0.6 });
   }
 
   /**
@@ -149,9 +190,11 @@ export class SmokeSystem {
    * @param v      빤 양 0..1
    * @param nose   코로도 조금 (두 줄기, 아래로)
    */
-  exhale(origin, v = 0.5, { nose = false } = {}) {
+  exhale(origin, v = 0.5, { nose = false, vapor = 'smoke' } = {}) {
     v = THREE.MathUtils.clamp(v, 0.05, 1);
-    this.streams.push({ origin, v, t: 0, dur: 0.35 + v * 1.65, acc: 0, nose, linger: 1.4 + v });
+    // 궐련형: 적고 금방 사라짐 / 액상: 많고 크고 오래감
+    const mul = vapor === 'heat' ? { n: 0.7, size: 0.9, life: 0.55, alpha: 0.85 } : vapor === 'vape' ? { n: 1.7, size: 1.35, life: 1.25, alpha: 1.15 } : { n: 1, size: 1, life: 1, alpha: 1 };
+    this.streams.push({ origin, v, t: 0, dur: (0.35 + v * 1.65) * (vapor === 'vape' ? 1.2 : 1), acc: 0, nose, linger: 1.4 + v, mul });
   }
 
   /** (호환) 한 지점에서 한 번에 내뱉기 → 고정 위치 흐름으로 */
@@ -193,11 +236,44 @@ export class SmokeSystem {
     for (const s of this.streams) {
       s.t += dt;
       const { p, d } = s.origin();
+      if (s.french) {
+        // 입에서 천천히 나와 위로 → 0.25초 뒤부터 코로 빨려 들어감
+        if (s.t < s.dur) {
+          s.acc += dt * 70;
+          while (s.acc > 1) {
+            s.acc -= 1;
+            v3.copy(d).multiplyScalar(0.05 + Math.random() * 0.04);
+            v3.y += 0.03 + Math.random() * 0.03;
+            v3.x += (Math.random() - 0.5) * 0.03; v3.z += (Math.random() - 0.5) * 0.03;
+            this.emit(p, v3, { size: 0.02, grow: 0.06, life: 2.2, alpha: 0.16, turb: 0.3, mode: MODE.BREATH, tint: 1, attract: s.nose, delay: 0.25 + Math.random() * 0.2 });
+          }
+        }
+        continue;
+      }
+      if (s.jets) {
+        if (s.t < s.dur) {
+          const f = 1 - s.t / s.dur;
+          s.acc += dt * 140 * f;
+          side.crossVectors(d, up).normalize();
+          while (s.acc > 1) {
+            s.acc -= 1;
+            for (const sx of [-1, 1]) {
+              const np = v3.copy(p).addScaledVector(side, sx * 0.013);
+              np.y += 0.035;
+              const nv = d.clone().multiplyScalar(0.55 * s.v).add(new THREE.Vector3(0, -0.5 * s.v, 0)).addScaledVector(side, sx * 0.12);
+              nv.x += (Math.random() - 0.5) * 0.08; nv.z += (Math.random() - 0.5) * 0.08;
+              this.emit(np, nv, { size: 0.03, grow: 0.3, life: 3.5, alpha: 0.06 + 0.04 * f, turb: 1, mode: MODE.BREATH, tint: 1 });
+            }
+          }
+        }
+        continue;
+      }
+      const M = s.mul || { n: 1, size: 1, life: 1, alpha: 1 };
       if (s.t < s.dur) {
         // f: 처음엔 세게, 끝으로 갈수록 약하게 (폐에서 다 빠져나가는 느낌)
         const k = s.t / s.dur;
         const f = Math.pow(1 - k, 0.7) * Math.min(1, s.t / 0.06);
-        s.acc += dt * (48 + 82 * s.v) * f;
+        s.acc += dt * (48 + 82 * s.v) * f * M.n;
         side.crossVectors(d, up).normalize();
         while (s.acc > 1) {
           s.acc -= 1;
@@ -208,8 +284,8 @@ export class SmokeSystem {
           v3.addScaledVector(side, (Math.random() - 0.5) * spread * 2);
           v3.y += (Math.random() - 0.5) * spread * 1.5;
           this.emit(p, v3, {
-            size: 0.07 + 0.035 * s.v, grow: 0.56 + 0.4 * s.v, life: 5 + 3.5 * s.v,
-            alpha: (0.042 + 0.032 * s.v) * (0.55 + 0.45 * f), turb: 1.3, mode: MODE.BREATH, tint: 1,
+            size: (0.07 + 0.035 * s.v) * M.size, grow: (0.56 + 0.4 * s.v) * M.size, life: (5 + 3.5 * s.v) * M.life,
+            alpha: (0.042 + 0.032 * s.v) * (0.55 + 0.45 * f) * M.alpha, turb: 1.3, mode: MODE.BREATH, tint: 1,
           });
         }
         // 코로도 (두 줄기, 아래로 가늘게)
@@ -271,6 +347,18 @@ export class SmokeSystem {
           const dd = tb < 0.5 ? Math.exp(-0.35 * dt) : drag;
           vx *= dd; vz *= dd;
         }
+      }
+      // 묘기: 목표(입/코)로 빨려 들어감 → 닿으면 사라짐
+      const at = this.attractId[i];
+      if (at >= 0 && age > this.attractDelay[i] && this.targets[at]) {
+        const tp = this.targets[at]();
+        const dx = tp.x - px, dy = tp.y - py, dz = tp.z - pz;
+        const dist = Math.hypot(dx, dy, dz);
+        if (dist < 0.025) { this.age[i] = life; this.alpha[i] = 0; continue; }
+        const pull = Math.min(1, (age - this.attractDelay[i]) * 2.5) * 2.2;
+        vx += (dx / dist * Math.min(1.2, dist * 5) - vx) * pull * dt * 4;
+        vy += (dy / dist * Math.min(1.2, dist * 5) - vy) * pull * dt * 4;
+        vz += (dz / dist * Math.min(1.2, dist * 5) - vz) * pull * dt * 4;
       }
       const x = px + vx * dt, z = pz + vz * dt;
       let y = py + vy * dt;

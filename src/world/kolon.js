@@ -147,7 +147,8 @@ export function createKolon({ pts, h = 71 }, { envMap }) {
   brick.wrapS = brick.wrapT = THREE.RepeatWrapping;
   const plazaW = 21.5, plazaD = 50;
   brick.repeat.set(plazaW / 1.6, plazaD / 1.6);
-  const plaza = new THREE.Mesh(new THREE.PlaneGeometry(plazaW, plazaD), new THREE.MeshStandardMaterial({ map: brick, roughness: 0.88 }));
+  const plazaMat = new THREE.MeshStandardMaterial({ map: brick, roughness: 0.88 });
+  const plaza = new THREE.Mesh(new THREE.PlaneGeometry(plazaW, plazaD), plazaMat);
   plaza.rotation.x = -Math.PI / 2;
   plaza.position.set(-27.5 + plazaW / 2, 0.028, 2);
   plaza.receiveShadow = true;
@@ -224,6 +225,7 @@ export function createKolon({ pts, h = 71 }, { envMap }) {
     group,
     north, south,
     colliders: { polygons: [north, south], circles, segments: [[railX, -26, railX, -12.5], [railX, -5.5, railX, 30]] },
+    setSnow(k) { plazaMat.color.setRGB(1, 1, 1).lerp(new THREE.Color(0xe8ecf2).multiplyScalar(1.6), k * 0.75); },
     passage: { x0: Math.max(xN[0], xS[0]), x1: Math.min(xN.at(-1), xS.at(-1)) },
   };
 }

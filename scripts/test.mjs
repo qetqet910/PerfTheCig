@@ -130,6 +130,51 @@ console.log('\n[Smoker 상태 머신]');
   ok(rainyClicks < dryClicks, '비 오면 라이터가 더 잘 안 켜짐', `rain ${rainyClicks}/400 vs dry ${dryClicks}/400`);
 }
 
+// ---------------------------------------------------------------- 전자담배
+console.log('\n[궐련형 / 액상 전자담배]');
+{
+  const ev = []; const sm = new Smoker((n, d) => ev.push([n, d]), 'heat');
+  sm.context({});
+  ok(sm.state === 'lighting' && ev.at(-1)[0] === 'insert' && sm.pack === PACK_SIZE - 1, '궐련형: 스틱 꽂으면 예열 시작');
+  sm.press('puff');
+  ok(sm.holding === null, '궐련형: 예열 중엔 못 빰 (라이터·불 없음)');
+  step(sm, 6.1);
+  ok(sm.state === 'lit' && ev.some((e) => e[0] === 'ready'), '궐련형: 6초 예열 끝나면 징- 하고 사용 가능');
+  sm.flick();
+  ok(!ev.some((e) => e[0] === 'ash' || e[0] === 'tapEmpty'), '궐련형: 재 없음 (털기 무시)');
+  for (let i = 0; i < 14 && sm.state === 'lit'; i++) { sm.press('puff'); step(sm, 0.8); sm.release('puff'); step(sm, 0.5); }
+  ok(sm.state === 'done' && ev.some((e) => e[0] === 'heatEnd'), '궐련형: 14모금이면 끝', `puffs=${sm.puffs} state=${sm.state}`);
+  sm.context({ ashtrayDist: 0.5, trayIdx: 1 });
+  ok(ev.at(-1)[0] === 'butt' && ev.at(-1)[1].device === 'heat' && ev.at(-1)[1].inTray, '궐련형: 다 핀 스틱은 재떨이에');
+}
+{
+  const ev = []; const sm = new Smoker((n, d) => ev.push([n, d]), 'vape');
+  const pack0 = sm.pack;
+  sm.context({});
+  ok(sm.state === 'lit' && ev.at(-1)[0] === 'vapeOn' && sm.pack === pack0, '액상: 꺼내면 바로 사용, 갑 안 줄어듦');
+  sm.press('puff'); step(sm, 2); sm.release('puff');
+  const ex = ev.find((e) => e[0] === 'exhale');
+  ok(ex && ex[1].device === 'vape', '액상: 내뱉기 이벤트에 기기 정보');
+  ok(sm.liquid < 1 && sm.liquid > 0.95, '액상: 빤 만큼 액상 줄어듦', sm.liquid.toFixed(3));
+  sm.liquid = 0.005; sm.press('puff'); step(sm, 1);
+  ok(sm.state === 'done' && ev.some((e) => e[0] === 'liquidEmpty'), '액상: 다 쓰면 done');
+  sm.context({});
+  ok(sm.state === 'lit' && sm.liquid === 1, '액상: 클릭하면 채워서 다시 사용');
+  sm.context({});
+  ok(sm.state === 'none' && ev.at(-1)[0] === 'vapeOff' && !ev.some((e) => e[0] === 'butt'), '액상: 넣으면 끝 (꽁초 없음)');
+  ok(sm.setDevice('cig') && sm.device === 'cig', '손에 아무것도 없으면 기기 바꾸기 가능');
+  sm.context({});
+  ok(!sm.setDevice('vape'), '뭔가 들고 있으면 기기 못 바꿈');
+}
+{
+  const sm = new Smoker(() => {}, 'cig');
+  light(sm);
+  const l0 = sm.len;
+  ok(sm.takeDrag(1.1) && sm.len < l0, '묘기: 한 모금 분량 소모');
+  sm.press('puff');
+  ok(!sm.takeDrag(1), '묘기: 빠는 중엔 시작 안 됨');
+}
+
 // ---------------------------------------------------------------- Relay
 console.log('\n[멀티플레이 릴레이]');
 const server = http.createServer();
@@ -175,6 +220,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(150);
   ok(B.msgs.some((m) => m.t === 'leave'), '나가면 leave 알림');
   B.ws.close(); C.ws.close();
+}
+{
+  // 같은 브라우저(세션 ID)로 6번째 창 → 거절
+  const sidClient = () => new Promise((res) => {
+    const ws = new WebSocket(url);
+    const msgs = [];
+    ws.on('message', (d) => { const m = JSON.parse(d); msgs.push(m); if (m.t === 'welcome' || m.t === 'denied') res({ ws, m }); });
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', name: 'S', sid: 'same-browser' })));
+  });
+  const cs = [];
+  for (let i = 0; i < 5; i++) cs.push(await sidClient());
+  ok(cs.every((c) => c.m.t === 'welcome'), '같은 브라우저 창 5개까지는 입장');
+  const sixth = await sidClient();
+  ok(sixth.m.t === 'denied' && sixth.m.max === 5, '6번째 창은 거절');
+  const other = await (async () => { const ws = new WebSocket(url); return new Promise((res) => { ws.on('message', (d) => { const m = JSON.parse(d); if (m.t === 'welcome' || m.t === 'denied') res({ ws, m }); }); ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', name: 'O', sid: 'other-browser' }))); }); })();
+  ok(other.m.t === 'welcome', '다른 브라우저는 상관없이 입장');
+  cs[0].ws.close();
+  await sleep(150);
+  const again = await sidClient();
+  ok(again.m.t === 'welcome', '창 하나 닫으면 다시 들어올 수 있음');
+  [...cs, sixth, other, again].forEach((c) => c.ws.close());
 }
 server.close();
 

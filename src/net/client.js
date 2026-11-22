@@ -2,6 +2,13 @@
  * 멀티플레이 클라이언트. 서버: server/relay.js (dev에선 Vite에 붙어 /ws)
  * handlers: { welcome, join, leave, state, puff, chat, status(online:boolean) }
  */
+/** 같은 브라우저의 모든 탭이 공유하는 세션 ID (창 수 제한용) */
+function sessionId() {
+  let id = localStorage.getItem('gvalley.sid');
+  if (!id) { id = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('gvalley.sid', id); }
+  return id;
+}
+
 export class Net {
   constructor(handlers) {
     this.h = handlers;
@@ -25,11 +32,12 @@ export class Net {
     this.ws = ws;
     // CONNECTING에서 멈추는 경우(페이지 로드 직후 등)가 있어서 타임아웃 후 재시도
     const stuck = setTimeout(() => { if (ws.readyState === 0) ws.close(); }, 4000);
-    ws.onopen = () => { clearTimeout(stuck); ws.send(JSON.stringify({ t: 'hello', name, color })); };
+    ws.onopen = () => { clearTimeout(stuck); ws.send(JSON.stringify({ t: 'hello', name, color, sid: sessionId() })); };
     ws.onmessage = (e) => {
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
       if (m.t === 'welcome') { this.id = m.id; this.h.status?.(true); }
+      if (m.t === 'denied') this.closedByUser = true; // 거절되면 재접속 안 함
       this.h[m.t]?.(m);
     };
     ws.onclose = () => {

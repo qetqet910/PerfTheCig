@@ -96,3 +96,21 @@ body.fp .ctx.show { display: block; }
 .toast.sys { background: #0d1220e8; color: #e8ecf2; border: 1px solid #ffffff1a; }
 .toast.out { opacity: 0; transform: translateX(20px); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* 상호작용 대상 조준 중: 조준점 커짐 */
+body.aiming .crosshair { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: transparent; border: 2px solid #fff; transition: all .12s; }
+
+/* 담배 종류 선택 */
+.devices { display: flex; gap: 6px; margin: -6px 0 16px; }
+.devices button { flex: 1; padding: 8px 4px; border-radius: 8px; border: 1px solid #ffffff22; background: #ffffff0a; color: #cfd6e2; font: inherit; font-size: 12px; cursor: pointer; }
+.devices button.sel { border-color: #7fe0a8; color: #fff; background: #1f8a5c33; }
+.smokebar .row.device { font-weight: 700; font-size: 12px; opacity: .9; margin-bottom: 4px; }
+/* 묘기 목록 (피우는 중일 때만) */
+.tricks { position: absolute; right: 24px; bottom: 196px; font-size: 11px; padding: 6px 10px; border-radius: 10px; background: #05070caa; border: 1px solid #ffffff14; display: none; }
+.tricks.show { display: block; }
+.tricks kbd { font-family: ui-monospace, monospace; font-size: 10px; padding: 0 4px; margin: 0 2px 0 6px; border-radius: 3px; border: 1px solid #ffffff40; background: #ffffff10; }
+/* 창 수 제한 */
+.deniedBox { position: absolute; inset: 0; display: none; place-items: center; background: #05070ce8; pointer-events: auto; text-align: center; z-index: 5; }
+body.denied .deniedBox { display: grid; }
+.deniedBox .big { font-size: 22px; font-weight: 800; }
+.deniedBox .small { font-size: 13px; opacity: .7; margin-top: 10px; max-width: 360px; }

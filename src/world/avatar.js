@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { bubbleTexture, nameTexture } from '../util.js';
-import { createCigarette, createLighter } from '../smoke/props.js';
+import { createCigarette, createLighter, createHeatDevice, createVape } from '../smoke/props.js';
+import { createPaperCup, createDrink, COFFEE_MENU, DRINKS, SNACKS } from './items.js';
+import { performTrick } from '../smoke/tricks.js';
 
 /**
  * 절차적 SD(2등신) 직장인 캐릭터.
@@ -239,6 +241,14 @@ export class Avatar {
     this.ember = this.cigObj.ember;
     this.emberMat = this.cigObj.emberMat;
     this.R.hand.add(this.cig);
+    // 전자담배 (담배와 같은 위치/축)
+    this.heatDev = createHeatDevice(1.35);
+    this.vapeDev = createVape(1.35);
+    for (const dvc of [this.heatDev, this.vapeDev]) {
+      dvc.group.position.copy(this.cig.position);
+      dvc.group.visible = false;
+      this.R.hand.add(dvc.group);
+    }
     // 라이터 (왼손, 불붙일 때만)
     this.lighter = createLighter({ scale: 1.4, color: [0x2f6fd1, 0xd23a3a, 0x2fa15a, 0xe0b020][Math.floor(Math.random() * 4)] });
     this.lighter.group.position.set(0, -0.05, 0.03);
@@ -246,6 +256,11 @@ export class Avatar {
     this.L.hand.add(this.lighter.group);
     this.coughUntil = 0;
     this.coughPuffs = [];
+    // 왼손 음료 (월드 공간에 배치: 손 위치 따라가되 컵은 똑바로)
+    this.itemHolder = new THREE.Group();
+    this.group.add(this.itemHolder);
+    this.itemObj = null;
+    this.itemKey = '';
 
     // --- 폰 (월드 공간에서 매 프레임 배치) ---
     this.phone = null;
@@ -354,7 +369,32 @@ export class Avatar {
     this.group.add(this.nameSprite);
   }
 
+  /** code: 0 없음 / 1 종이컵(idx=메뉴) / 2 캔·병(idx=음료) */
+  setItem(code, idx) {
+    const key = code ? code + ':' + idx : '';
+    if (key === this.itemKey) return;
+    this.itemKey = key;
+    this.itemHolder.clear();
+    this.itemObj = null;
+    if (!code) return;
+    if (code === 1) {
+      const cup = createPaperCup(1.45);
+      cup.setLiquid((COFFEE_MENU[idx] || COFFEE_MENU[0]).liquid);
+      this.itemObj = cup;
+      this.itemHolder.add(cup.group);
+    } else if (code === 3) {
+      const d = createDrink(SNACKS[idx] || SNACKS[0], 1.35);
+      this.itemObj = d;
+      this.itemHolder.add(d.group);
+    } else {
+      const d = createDrink(DRINKS[idx] || DRINKS[0], 1.35);
+      this.itemObj = d;
+      this.itemHolder.add(d.group);
+    }
+  }
+
   setBodyVisible(v) {
+    this.itemHolder.visible = v;
     this.model.visible = v;
     if (this.phone) this.phone.visible = v;
     if (this.nameSprite) this.nameSprite.visible = v;
@@ -371,7 +411,7 @@ export class Avatar {
   }
 
   /** 입에서 후~ (v = 빤 양 0..1, 입을 따라가며 흘러나옴) */
-  exhale(v = 0.5, nose = false) {
+  exhale(v = 0.5, nose = false, vapor = 'smoke') {
     if (!this.smoke) return;
     const o = { p: new THREE.Vector3(), d: new THREE.Vector3() };
     this.smoke.exhale(() => {
@@ -379,7 +419,7 @@ export class Avatar {
       o.d.set(0, -0.12, 1).applyQuaternion(this.root.quaternion).normalize();
       o.p.addScaledVector(o.d, 0.03);
       return o;
-    }, v, { nose });
+    }, v, { nose, vapor });
     this.mouthOUntil = this.clock + 0.4 + v * 1.6;
   }
 
@@ -391,6 +431,21 @@ export class Avatar {
     this.say('콜록콜록');
     this.coughUntil = this.clock + 1.3;
     this.coughPuffs = [0.05, 0.35, 0.62, 1.0].map((d) => this.clock + d);
+  }
+
+  /** 입 위치/방향 */
+  mouthOrigin() {
+    const p = this.mouth.getWorldPosition(new THREE.Vector3());
+    const d = new THREE.Vector3(0, -0.1, 1).applyQuaternion(this.root.quaternion).normalize();
+    p.addScaledVector(d, 0.03);
+    return { p, d };
+  }
+
+  /** 묘기 연출 (원격 플레이어/NPC) */
+  trick(i, vapor = 'smoke') {
+    if (!this.smoke) return;
+    performTrick(this.smoke, i, () => this.mouthOrigin(), { vapor });
+    this.mouthOUntil = this.clock + 1.5;
   }
 
   /** 도넛 연기 */
@@ -411,7 +466,7 @@ export class Avatar {
     const sp = st.speed ?? 0;
     const c = st.c ?? 2;
     const lighting = c === 1;
-    const k = lighting ? 1 : c === 2 ? (st.k ?? 0) : 0;
+    const k = lighting && (st.dv ?? 0) === 0 ? 1 : c === 2 ? (st.k ?? 0) : 0; // 궐련형 예열 중엔 손 안 올림
     const inh = c === 2 ? (st.inhale ?? 0) : 0;
     const coughing = t < this.coughUntil;
     const moving = THREE.MathUtils.smoothstep(sp, 0.1, 0.9);
@@ -423,7 +478,9 @@ export class Avatar {
     const amp = moving * (0.55 + run * 0.35);
     this.legs[0].rotation.x = Math.sin(ph) * amp;
     this.legs[1].rotation.x = -Math.sin(ph) * amp;
-    this.body.position.y = Math.abs(Math.sin(ph)) * 0.04 * moving + Math.sin(t * 1.8) * 0.004 * (1 - moving);
+    const sitting = !!st.si;
+    if (sitting) { this.legs[0].rotation.x = this.legs[1].rotation.x = -1.45; }
+    this.body.position.y = Math.abs(Math.sin(ph)) * 0.04 * moving + Math.sin(t * 1.8) * 0.004 * (1 - moving) + (st.si ? 0.08 : 0);
     this.body.rotation.z = Math.sin(ph) * 0.06 * moving + Math.sin(t * 0.4) * 0.02 * (1 - moving); // 뒤뚱뒤뚱
     this.body.rotation.x = run * 0.22 + (coughing ? Math.abs(Math.sin(t * 22)) * 0.18 : 0);
     this.head.rotation.y = Math.sin(t * 0.27) * 0.3 * (1 - moving) * (1 - k);
@@ -441,7 +498,14 @@ export class Avatar {
 
     if (this.model.visible) {
       // 오른손: 담배 (가슴 앞 ↔ 입)
-      this.cig.visible = c !== 0;
+      const dv = st.dv ?? 0;
+      this.cig.visible = c !== 0 && dv === 0;
+      this.heatDev.group.visible = c !== 0 && dv === 1;
+      this.vapeDev.group.visible = c !== 0 && dv === 2;
+      this.heatDev.setLed(c === 1 ? 'blink' : c === 2 ? 'on' : 'off');
+      this.heatDev.update(t);
+      this.vapeDev.setFiring((st.inhale ?? 0) > 0.1);
+      this.vapeDev.setLiquid(st.lq ?? 1);
       if (c !== 0) {
         const rest = new THREE.Vector3(-0.15, 0.6, 0.2), mouth = new THREE.Vector3(-0.05, 0.98, 0.25);
         const tl = rest.lerp(mouth, k);
@@ -455,15 +519,25 @@ export class Avatar {
       this.cigObj.setLit(c === 2 || (lighting && (st.inhale ?? 0) > 0.5));
 
       // 왼손: 불붙이기(라이터) > 폰
-      this.lighter.group.visible = lighting;
-      this.lighter.setOn(lighting && (st.flame ?? true));
-      if (lighting) {
+      const lightingCig = lighting && (st.dv ?? 0) === 0;
+      this.lighter.group.visible = lightingCig;
+      this.lighter.setOn(lightingCig && (st.flame ?? true));
+      if (lightingCig) {
         if (this.phone) this.phone.visible = false;
         const tip = this.ember.getWorldPosition(new THREE.Vector3());
         const tgt = tip.clone().add(new THREE.Vector3(0, -0.07, 0));
         solveTwoBone(this.L.shoulder, this.L.elbow, this.L.hand, tgt, toWorld(0.55, 0.45, -0.3));
         this.lighter.update(t);
         this.head.rotation.x = 0.12;
+      } else if (st.it) {
+        // 음료 든 손: 가슴 앞 ↔ 입 (st.sp = 마시는 정도)
+        if (this.phone) this.phone.visible = false;
+        const sp = st.sp ?? 0;
+        const wl = Math.max(sp, 1 - moving * 0.6);
+        const animL = this.L.hand.getWorldPosition(new THREE.Vector3());
+        const tgt = new THREE.Vector3(0.12, 0.6, 0.24).lerp(new THREE.Vector3(0.03, 0.9, 0.24), sp);
+        solveTwoBone(this.L.shoulder, this.L.elbow, this.L.hand, toWorld(tgt.x, tgt.y, tgt.z).lerp(animL, 1 - wl), toWorld(0.55, 0.45, -0.3));
+        this.head.rotation.x = -0.15 * sp;
       } else if (this.phone) {
         this.phone.visible = true;
         const wl = 1 - moving * 0.7;
@@ -498,7 +572,7 @@ export class Avatar {
       const dir = new THREE.Vector3((Math.random() - 0.5) * 0.4, -0.1, 1).applyQuaternion(this.root.quaternion).normalize();
       this.smoke.puff(p, dir, 0.35);
     }
-    if (this.smoke && this.model.visible && c === 2) {
+    if (this.smoke && this.model.visible && c === 2 && (st.dv ?? 0) === 0) {
       this.ember.getWorldPosition(_c);
       this.emitAcc += dt * (inh > 0.1 ? 4 : 11);
       while (this.emitAcc > 1) {
@@ -506,6 +580,16 @@ export class Avatar {
         _t.set((Math.random() - 0.5) * 0.02, 0.12 + Math.random() * 0.06, (Math.random() - 0.5) * 0.02);
         this.smoke.emit(_c, _t, { size: 0.035, grow: 0.3, life: 3.8, alpha: 0.1 });
       }
+    }
+    this.setItem(st.it || 0, st.ii ?? 0);
+    this.itemHolder.visible = this.model.visible && !lighting && !!st.it;
+    if (this.itemObj && this.itemHolder.visible) {
+      this.L.hand.getWorldPosition(this.itemHolder.position);
+      this.itemHolder.position.y -= 0.045;
+      this.itemHolder.quaternion.copy(this.root.quaternion);
+      this.itemHolder.rotateX(-(st.sp ?? 0) * 1.1); // 마실 때 입 쪽으로 기울임
+      this.itemHolder.translateZ(0.02);
+      this.itemObj.setFill?.(st.if ?? 1);
     }
     this.updateLabels();
   }

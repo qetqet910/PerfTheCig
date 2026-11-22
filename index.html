@@ -12,17 +12,20 @@
     <div class="title">
       <div class="place">서울 구로구 · 코오롱싸이언스밸리 1차·2차 사이</div>
       <div class="name">G밸리 흡연장</div>
-      <div class="clock"><span id="clock">--:--</span> · <span class="online" id="online">오프라인</span></div>
+      <div class="clock"><span id="clock">--:--</span> · <span class="online" id="online">오프라인</span> · <span id="weather">비</span></div>
     </div>
     <div class="crosshair"></div>
-    <div class="fp-hint"><kbd>WASD</kbd> 이동 · <kbd>좌클릭</kbd> 물기 / 꾹 빨기 / 톡 재 털기 · <kbd>우클릭</kbd> 꾹 도넛 / 톡 끄기 · <kbd>Enter</kbd> 채팅 · <kbd>Esc</kbd> 일시정지</div>
+    <div class="fp-hint"><kbd>WASD</kbd> 이동 · <kbd>좌클릭</kbd> 물기 / 꾹 빨기 / 톡 재 털기 · <kbd>우클릭</kbd> 꾹 도넛 / 톡 끄기 · <kbd>휠↑</kbd> 마시기 · <kbd>T</kbd> 담배 종류 · <kbd>Enter</kbd> 채팅 · <kbd>Esc</kbd> 일시정지</div>
     <div class="ctx" id="ctxHint"></div>
     <div class="smokebar" id="smokebar">
-      <div class="row"><span class="pack"><b id="packCount">20</b>/20</span><span class="sep">·</span>오늘 <b id="todayCount">0</b>개비</div>
+      <div class="row device" id="deviceName">궐련</div>
+      <div class="row"><span class="pack"><b id="packCount">20/20</b></span><span class="sep">·</span>오늘 <b id="todayCount">0</b>개비</div>
       <div class="cigbar"><div class="ash" id="cigAsh"></div><div class="paper" id="cigPaper"></div><div class="filter"></div></div>
-      <div class="row small">자리 비운 지 <b id="away">00:00</b></div>
+      <div class="row small">지갑 <b id="wallet">3,000</b>원 · 자리 비운 지 <b id="away">00:00</b></div>
     </div>
     <div class="toasts" id="toasts"></div>
+    <div class="tricks" id="tricks"><b>묘기</b> <kbd>1</kbd>고스트 <kbd>2</kbd>프렌치 <kbd>3</kbd>도넛 연발 <kbd>4</kbd>용 콧김</div>
+    <div class="deniedBox"><div><div class="big">창이 너무 많아요</div><div class="small" id="deniedMsg"></div></div></div>
     <div class="chat">
       <div id="chatLog"></div>
       <input id="chatInput" maxlength="80" placeholder="메시지 입력 후 Enter (Esc 취소)" autocomplete="off" />
@@ -35,6 +38,7 @@
         <p>잠깐 바람 좀 쐬고 올게요.</p>
         <input id="nick" maxlength="12" placeholder="닉네임" autocomplete="off" />
         <div class="swatches" id="swatches"></div>
+        <div class="devices" id="devices"></div>
         <button id="enter">담배 피러 나가기</button>
         <div class="note">같은 주소로 접속한 사람끼리 같은 흡연장에 서게 돼요</div>
       </div>

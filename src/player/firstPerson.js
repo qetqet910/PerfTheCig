@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { createCigarette, createLighter } from '../smoke/props.js';
+import { createCigarette, createLighter, createHeatDevice, createVape } from '../smoke/props.js';
+import { TRICKS, performTrick } from '../smoke/tricks.js';
+import { SNACKS } from '../world/items.js';
 import { Smoker } from '../smoke/smoker.js';
+import { createPaperCup, createDrink, COFFEE_MENU, DRINKS } from '../world/items.js';
 
 const EYE = 1.3; // SD 캐릭터 눈높이 근처
+const EYE_SIT = 1.12;
 const RADIUS = 0.28;
 const WALK = 1.6, RUN = 4.2;
 const SPAWN = { pos: new THREE.Vector3(-5.0, 0, 2.6), lookAt: new THREE.Vector3(0.5, 1.0, -0.4) };
@@ -14,7 +18,22 @@ const SPAWN = { pos: new THREE.Vector3(-5.0, 0, 2.6), lookAt: new THREE.Vector3(
  *   G: 꺼내서 불붙이기 / 꽁초 버리기 / (없으면) 한 개비 빌리기   X: 재 털기
  */
 export class FirstPerson {
-  constructor({ camera, dom, world, smoke, scene, onLockChange, onSmokerEvent, getContext }) {
+  constructor({ camera, dom, world, smoke, scene, onLockChange, onSmokerEvent, getContext, onItemEvent, onTrick, onSit, device = 'cig' }) {
+    this.onItemEvent = onItemEvent;
+    this.onTrick = onTrick;
+    this.onSit = onSit;
+    this.trick = null;   // { i, t, done }
+    this.seat = null;    // 앉은 자리
+    // 왼손에 든 음료 { type:'cup'|'can', fill, temp, opened, ... }
+    this.item = null;
+    this.itemVm = null;
+    this.itemObj = null;
+    this.sipT = 0;
+    this.wheelUntil = 0;
+    this.sipBlock = 0;
+    this.slurpAcc = 0;
+    this.steamAcc = 0;
+    this.interact = null; // 조준 중인 상호작용 대상 (main이 매 프레임 설정)
     this.camera = camera;
     this.world = world;
     this.smoke = smoke;
@@ -29,7 +48,7 @@ export class FirstPerson {
     this.emitAcc = 0;
     this.shake = 0;
 
-    this.smoker = new Smoker((name, data) => this.handleSmoker(name, data, onSmokerEvent));
+    this.smoker = new Smoker((name, data) => this.handleSmoker(name, data, onSmokerEvent), device);
 
     this.controls.addEventListener('lock', () => onLockChange?.(true));
     this.controls.addEventListener('unlock', () => onLockChange?.(false));
@@ -42,6 +61,8 @@ export class FirstPerson {
       if (e.code === 'KeyQ') this.smoker.press('ring');
       if (e.code === 'KeyG') this.smoker.context(this.getContext());
       if (e.code === 'KeyX') this.smoker.flick();
+      const tk = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+      if (tk >= 0) this.startTrick(tk);
     });
     addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
@@ -58,6 +79,7 @@ export class FirstPerson {
     dom.addEventListener('mousedown', (e) => {
       if (!this.active || !this.controls.isLocked || (e.button !== 0 && e.button !== 2)) return;
       const sm = this.smoker;
+      if (e.button === 0 && this.interact) { this.interact.click(); this.downAt[0] = -1; return; } // 자판기/쓰레기통 등
       this.downAt[e.button] = performance.now();
       if (sm.state === 'none' || sm.state === 'done') {
         sm.context(this.getContext());
@@ -68,6 +90,10 @@ export class FirstPerson {
         sm.press('puff'); // 물고 빨아야 불이 붙음
       }
     });
+    dom.addEventListener('wheel', (e) => {
+      if (!this.active || !this.controls.isLocked) return;
+      this.wheelUntil = e.deltaY < 0 ? performance.now() + 340 : 0; // 위로 굴리는 동안 마심
+    }, { passive: true });
     addEventListener('mouseup', (e) => {
       if (e.button !== 0 && e.button !== 2) return;
       const t0 = this.downAt[e.button];
@@ -94,6 +120,13 @@ export class FirstPerson {
       f.position.set(0.026, y + 0.004, 0.01);
       this.vm.add(f);
     }
+    this.heatDev = createHeatDevice(1);
+    this.heatDev.group.quaternion.copy(this.cig.group.quaternion);
+    this.heatDev.group.position.set(-0.012, -0.002, 0.018);
+    this.vapeDev = createVape(1);
+    this.vapeDev.group.quaternion.copy(this.cig.group.quaternion);
+    this.vapeDev.group.position.set(-0.012, -0.002, 0.018);
+    this.vm.add(this.heatDev.group, this.vapeDev.group);
     this.vm.visible = false;
     this.vm.scale.setScalar(1.05);
     camera.add(this.vm);
@@ -125,7 +158,7 @@ export class FirstPerson {
       const dir = cam.getWorldDirection(this._v2.clone());
       const p = this._v.copy(cam.position).addScaledVector(dir, 0.22);
       p.y -= 0.08;
-      if (data.type === 'ring') { dir.y += 0.05; this.smoke.ring(p, dir.normalize(), data.k); }
+      if (data.type === 'ring') { dir.y += 0.05; this.smoke.ring(p, dir.normalize(), data.k * (data.device === 'vape' ? 1.3 : 1)); }
       else {
         dir.y -= 0.12;
         dir.normalize();
@@ -138,7 +171,7 @@ export class FirstPerson {
           mouth.d.y -= 0.15;
           mouth.d.normalize();
           return mouth;
-        }, data.v, { nose: data.nose });
+        }, data.v, { nose: data.nose, vapor: data.device === 'cig' ? 'smoke' : data.device });
       }
       data.p = p.clone();
       data.d = dir.clone();
@@ -168,6 +201,68 @@ export class FirstPerson {
       data.z = this.feet.z + dir.z * 0.6;
     }
     outer?.(name, data);
+  }
+
+  /** 입 위치/방향 (매번 새 객체) */
+  mouthOrigin() {
+    const d = this.camera.getWorldDirection(new THREE.Vector3());
+    const p = this.camera.position.clone().addScaledVector(d, 0.16);
+    p.y -= 0.075;
+    d.y -= 0.15;
+    d.normalize();
+    return { p, d };
+  }
+
+  /** 묘기 (피우는 중일 때 1~4) */
+  startTrick(i) {
+    const sm = this.smoker;
+    if (this.trick || !TRICKS[i] || !sm.takeDrag(TRICKS[i].prep)) return;
+    this.trick = { i, t: 0, done: false };
+    this.onTrick?.('start', i);
+  }
+
+  /** 벤치에 앉기 / 일어나기 */
+  sit(seat) {
+    if (this.seat || seat.taken) return;
+    seat.taken = true;
+    this.seat = seat;
+    this.vel.set(0, 0);
+    this.feet.set(seat.x, 0, seat.z);
+    this.onSit?.(true, seat);
+  }
+  stand() {
+    if (!this.seat) return;
+    const seat = this.seat;
+    seat.taken = false;
+    this.seat = null;
+    // 벤치 앞으로 한 걸음
+    this.feet.set(seat.x - Math.sin(seat.yaw) * -0.65, 0, seat.z + Math.cos(seat.yaw) * 0.65);
+    this.world.resolve(this.feet, RADIUS);
+    this.onSit?.(false, seat);
+  }
+
+  /** 왼손에 음료 쥐기 (null이면 비움) */
+  setItem(item) {
+    if (this.itemVm) { this.camera.remove(this.itemVm); this.itemVm = null; this.itemObj = null; }
+    this.item = item;
+    this.sipT = 0;
+    if (!item) return;
+    const vm = new THREE.Group();
+    if (item.type === 'cup') {
+      const cup = createPaperCup(1);
+      cup.setLiquid(item.liquid);
+      cup.setFill(item.fill);
+      vm.add(cup.group);
+      this.itemObj = cup;
+    } else {
+      const can = createDrink(item.drink, 1);
+      vm.add(can.group);
+      this.itemObj = can;
+    }
+    vm.traverse((o) => { o.renderOrder = 20; });
+    vm.position.set(-0.2, -0.2, -0.42);
+    this.camera.add(vm);
+    this.itemVm = vm;
   }
 
   /** 재 덩어리 하나가 떨어짐 (재떨이 위면 재떨이 흙 높이에서 멈춤) */
@@ -259,11 +354,18 @@ export class FirstPerson {
     const sm = this.smoker;
     return {
       x: this.feet.x, z: this.feet.z,
-      ry: e.y + Math.PI, // 카메라는 -z를 봄 → 아바타(+z 정면) yaw
+      ry: this.seat ? this.seat.yaw : e.y + Math.PI, // 카메라는 -z를 봄 → 아바타(+z 정면) yaw
+      si: this.seat ? 1 : 0,
+      dv: { cig: 0, heat: 1, vape: 2 }[sm.device],
+      lq: sm.liquid,
       s: this.vel.length(),
       k: this.vmT,
       inh: sm.holding ? sm.inhale : 0,
       c: sm.code, len: sm.len, ash: sm.ash,
+      it: this.item ? ({ cup: 1, can: 2, snack: 3 })[this.item.type] : 0,
+      ii: this.item ? (this.item.type === 'cup' ? COFFEE_MENU.findIndex((m) => m.name === this.item.name) : this.item.type === 'snack' ? SNACKS.indexOf(this.item.drink) : DRINKS.indexOf(this.item.drink)) : -1,
+      if: this.item ? this.item.fill : 0,
+      sp: this.sipT,
     };
   }
 
@@ -289,9 +391,14 @@ export class FirstPerson {
     const a = 1 - Math.exp(-(wl > 0 ? 10 : 12) * dt);
     this.vel.x += (wx - this.vel.x) * a;
     this.vel.y += (wz - this.vel.y) * a;
-    this.feet.x += this.vel.x * dt;
-    this.feet.z += this.vel.y * dt;
-    this.world.resolve(this.feet, RADIUS);
+    if (this.seat) {
+      if (fwd || side) this.stand();
+      else { this.vel.set(0, 0); this.feet.set(this.seat.x, 0, this.seat.z); }
+    } else {
+      this.feet.x += this.vel.x * dt;
+      this.feet.z += this.vel.y * dt;
+      this.world.resolve(this.feet, RADIUS);
+    }
 
     // --- 헤드밥 + 기침 흔들림 ---
     const sp = this.vel.length();
@@ -300,13 +407,38 @@ export class FirstPerson {
     const by = Math.sin(this.bob * 2) * bobAmt;
     this.shake = Math.max(0, this.shake - dt);
     const sh = this.shake > 0 ? Math.sin(this.shake * 40) * 0.025 * Math.min(1, this.shake) : 0;
-    this.camera.position.set(this.feet.x, EYE + by + Math.abs(sh), this.feet.z);
+    this.camera.position.set(this.feet.x, (this.seat ? EYE_SIT : EYE) + by + Math.abs(sh), this.feet.z);
+
+    // --- 묘기 진행: 한 모금 빨아들임(prep) → 연출 ---
+    let trickRaise = 0;
+    if (this.trick) {
+      const T = this.trick, def = TRICKS[T.i];
+      T.t += dt;
+      if (T.t < def.prep) trickRaise = 1;
+      if (!T.done && T.t >= def.prep) {
+        T.done = true;
+        const vapor = sm.device === 'cig' ? 'smoke' : sm.device;
+        performTrick(this.smoke, T.i, () => this.mouthOrigin(), { vapor });
+        this.onTrick?.('perform', T.i);
+      }
+      if (T.t > def.prep + 2.2) this.trick = null;
+    }
 
     // --- 뷰모델 ---
     const has = sm.state !== 'none';
     const lighting = sm.state === 'lighting';
     this.vm.visible = has;
-    const raise = lighting || (sm.holding && sm.canInhale) ? 1 : 0;
+    const dev = sm.device;
+    const raise = (lighting && dev === 'cig') || (sm.holding && sm.canInhale) || trickRaise ? 1 : 0;
+    // 기기별로 손에 든 것
+    this.cig.group.visible = dev === 'cig';
+    this.heatDev.group.visible = dev === 'heat';
+    this.vapeDev.group.visible = dev === 'vape';
+    this.heatDev.setStick(has);
+    this.heatDev.setLed(lighting ? 'blink' : sm.state === 'lit' ? 'on' : 'off');
+    this.heatDev.update(performance.now() / 1000);
+    this.vapeDev.setFiring(!!(sm.holding && sm.canInhale) || trickRaise > 0);
+    this.vapeDev.setLiquid(sm.liquid);
     this.vmT += (raise - this.vmT) * (1 - Math.exp(-8 * dt));
     const t = this.vmT;
     this.vm.position.set(
@@ -363,7 +495,7 @@ export class FirstPerson {
       : 3 + (sm.holding ? sm.inhale * 16 : 0) + Math.sin(performance.now() * 0.013) * 0.5;
 
     // 라이터: 아래에서 올라와 담배 끝에 불을 댐
-    this.lightT += ((lighting ? 1 : 0) - this.lightT) * (1 - Math.exp(-10 * dt));
+    this.lightT += ((lighting && dev === 'cig' ? 1 : 0) - this.lightT) * (1 - Math.exp(-10 * dt));
     this.lighter.group.visible = this.lightT > 0.02;
     if (this.lighter.group.visible) {
       this.vm.updateMatrixWorld(true);
@@ -375,8 +507,60 @@ export class FirstPerson {
       this.lighter.update(performance.now() / 1000);
     }
 
-    // 불씨 연기
-    if (sm.state === 'lit') {
+    // --- 왼손 아이템: 휠↑ / F 로 사용 (마시기·먹기·흔들기…) ---
+    if (this.item && this.itemVm) {
+      const it = this.item;
+      const emit = (n) => this.onItemEvent?.(n, it);
+      const use = it.type === 'snack' ? it.drink.use : it.type === 'cup' ? 'sip' : 'drink';
+      const wantSip = (performance.now() < this.wheelUntil || k.has('KeyF')) && it.fill > 0.005 && sm.t > this.sipBlock;
+      // 핫팩은 입으로 안 가져가고 손에서 흔들기만
+      const lift = use === 'warm' ? 0.25 : 1;
+      this.sipT += ((wantSip ? lift : 0) - this.sipT) * (1 - Math.exp(-9 * dt));
+      const q = this.sipT;
+      this.itemVm.position.set(
+        THREE.MathUtils.lerp(-0.2, -0.035, q) - Math.cos(this.bob) * bobAmt * 0.5,
+        THREE.MathUtils.lerp(-0.2, -0.095, q) + by * 0.5,
+        THREE.MathUtils.lerp(-0.42, -0.2, q),
+      );
+      const tiltDrink = use === 'sip' || use === 'drink';
+      this.itemVm.rotation.set(THREE.MathUtils.lerp(0.08, tiltDrink ? 1.05 : 0.35, q), THREE.MathUtils.lerp(0.35, 0.05, q), THREE.MathUtils.lerp(0.1, 0, q));
+      if (use === 'warm' && wantSip) this.itemVm.rotation.z += Math.sin(performance.now() * 0.03) * 0.25; // 흔들흔들
+      if (wantSip && q > 0.65 * lift) {
+        if ((use === 'drink') && !it.opened) { it.opened = true; emit(it.drink.kind === 'bottle' ? 'cap' : 'open'); this.sipBlock = sm.t + 0.45; }
+        else if (use === 'sip' && it.temp > 0.72 && !it.burned) { it.burned = true; emit('hot'); this.sipBlock = sm.t + 1.4; this.shake = 0.5; this.wheelUntil = 0; }
+        else if (use === 'sip' || use === 'drink') {
+          it.fill = Math.max(0, it.fill - dt * (use === 'sip' ? 0.14 : 0.17));
+          this.slurpAcc += dt;
+          if (this.slurpAcc > 0.42) { this.slurpAcc = 0; emit(use === 'sip' ? 'slurp' : 'gulp'); }
+          if (it.fill <= 0.005) { it.fill = 0; emit('empty'); this.wheelUntil = 0; }
+        } else if (use === 'eat') {
+          if (!it.opened) { it.opened = true; emit('rustle'); this.sipBlock = sm.t + 0.4; }
+          else { it.fill = Math.max(0, it.fill - 0.25); emit('bite'); this.sipBlock = sm.t + 0.55; if (it.fill <= 0.005) { it.fill = 0; emit('empty'); this.wheelUntil = 0; } }
+        } else if (use === 'warm') {
+          this.slurpAcc += dt;
+          if (this.slurpAcc > 0.5) { this.slurpAcc = 0; emit('warm'); }
+        } else { // gum / mask / wipe: 한 번 쓰면 끝
+          it.fill = 0; emit(use); this.wheelUntil = 0;
+        }
+      }
+      if (it.type === 'cup') {
+        it.temp = Math.max(0, it.temp - dt / 150);
+        this.itemObj.setFill(it.fill);
+        // 김: 뜨거울수록 많이
+        if (it.fill > 0.02 && it.temp > 0.15) {
+          this.steamAcc += dt * it.temp * 5;
+          while (this.steamAcc > 1) {
+            this.steamAcc -= 1;
+            this.itemVm.updateMatrixWorld(true);
+            this.itemObj.topWorld(this._v);
+            this.smoke.emit(this._v, this._v2.set((Math.random() - 0.5) * 0.02, 0.1, (Math.random() - 0.5) * 0.02), { size: 0.018, grow: 0.12, life: 1.4, alpha: 0.1 * it.temp, tint: 1 });
+          }
+        }
+      }
+    }
+
+    // 불씨 연기 (궐련만)
+    if (sm.state === 'lit' && dev === 'cig') {
       this.cig.tipWorld(this._v2);
       this.emitAcc += dt * (sm.holding ? 4 : 12);
       while (this.emitAcc > 1) {

@@ -72,14 +72,16 @@ export async function loadOsmCity(url, { offset, rotation = 0, avoid = [], exclu
     colliders: { polygons, circles: lamps.map((l) => [l.x, l.z, 0.15]) },
     excluded,
     update() {},
-    setWetness(w) {
-      // 젖은 아스팔트: 어둡고 매끈하게 → 가로등 반사가 살아남
-      groundMat.roughness = THREE.MathUtils.lerp(0.92, 0.28, w);
-      roadMat.roughness = THREE.MathUtils.lerp(0.7, 0.18, w);
-      walkMat.roughness = THREE.MathUtils.lerp(0.85, 0.3, w);
-      groundMat.color.copy(dry.g).multiplyScalar(1 - 0.35 * w);
-      roadMat.color.copy(dry.r).multiplyScalar(1 - 0.3 * w);
-      walkMat.color.copy(dry.w).multiplyScalar(1 - 0.35 * w);
+    /** w: 젖음 0..1, snow: 눈 덮임 0..1 (눈이 쌓이면 하얗고 거칠게) */
+    setWetness(w, snow = 0) {
+      const white = new THREE.Color(0xdfe4ec);
+      const wet = w * (1 - snow);
+      groundMat.roughness = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.92, 0.28, wet), 0.95, snow);
+      roadMat.roughness = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.7, 0.18, wet), 0.9, snow);
+      walkMat.roughness = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.85, 0.3, wet), 0.95, snow);
+      groundMat.color.copy(dry.g).multiplyScalar(1 - 0.35 * wet).lerp(white, snow * 0.85);
+      roadMat.color.copy(dry.r).multiplyScalar(1 - 0.3 * wet).lerp(white, snow * 0.6); // 차도는 바퀴 자국 때문에 덜 하얌
+      walkMat.color.copy(dry.w).multiplyScalar(1 - 0.35 * wet).lerp(white, snow * 0.85);
     },
   };
 }
