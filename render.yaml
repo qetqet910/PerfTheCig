@@ -11,5 +11,3 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22
-      - key: MAX_PER_IP   # 같은 IP에서 동시 접속 수 (같은 회사 친구들이면 늘리기)
-        value: 1

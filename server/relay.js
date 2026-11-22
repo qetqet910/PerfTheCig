@@ -28,10 +28,10 @@ function clientIp(req) {
 }
 
 /**
- * maxPerIp: 같은 IP에서 동시에 들어올 수 있는 사람 수 (기본 1, Infinity면 제한 없음)
- *   같은 회사/와이파이는 공인 IP가 같은 경우가 많으니 필요하면 MAX_PER_IP 환경변수로 늘리기
+ * maxPerIp: 같은 IP에서 동시에 들어올 수 있는 사람 수 (기본 제한 없음)
+ *   켜려면 환경변수 MAX_PER_IP (같은 회사/와이파이는 공인 IP가 같을 수 있음)
  */
-export function attachRelay(httpServer, { path = '/ws', log = console.log, maxPerIp = 1 } = {}) {
+export function attachRelay(httpServer, { path = '/ws', log = console.log, maxPerIp = Infinity } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 });
   const players = new Map(); // id -> { ws, info, sid }
   const butts = [];           // [x, z] 바닥 꽁초 (공유)
