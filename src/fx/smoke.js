@@ -130,7 +130,7 @@ export class SmokeSystem {
 
   setViewport(height, fov) {
     this.material.uniforms.uScale.value = height / (2 * Math.tan(THREE.MathUtils.degToRad(fov) / 2));
-    this.baseMaxPx = height * 0.38;
+    this.baseMaxPx = height * 0.6; // 입자 하나 최대 화면 크기 (프레임 떨어지면 adapt()가 줄임)
     this.material.uniforms.uMaxPx.value = this.baseMaxPx;
   }
 
@@ -213,11 +213,12 @@ export class SmokeSystem {
    */
   exhale(origin, v = 0.5, { nose = false, vapor = 'smoke' } = {}) {
     v = THREE.MathUtils.clamp(v, 0.05, 1);
+    if (vapor === 'vape') v = 0.45 + v * 0.55; // 폐호흡: 짧게 빨아도 기본이 큼
     // 궐련형: 적고 금방 사라짐 / 액상: 많고 크고 오래감
     const mul = vapor === 'heat' ? { n: 0.7, size: 0.9, life: 0.55, alpha: 0.85, spread: 1, speed: 1 }
-      : vapor === 'vape' ? { n: 1.0, size: 2.3, life: 1.5, alpha: 1.45, spread: 1.6, speed: 1.15 }
+      : vapor === 'vape' ? { n: 1.15, size: 3.2, life: 1.9, alpha: 1.8, spread: 2.1, speed: 1.25 }
       : { n: 1, size: 1, life: 1, alpha: 1, spread: 1, speed: 1 };
-    this.streams.push({ origin, v, t: 0, dur: (0.35 + v * 1.65) * (vapor === 'vape' ? 1.35 : 1), acc: 0, nose, linger: 1.4 + v, mul });
+    this.streams.push({ origin, v, t: 0, dur: (0.35 + v * 1.65) * (vapor === 'vape' ? 1.6 : 1), acc: 0, nose, linger: (1.4 + v) * (vapor === 'vape' ? 1.6 : 1), mul });
   }
 
   /** (호환) 한 지점에서 한 번에 내뱉기 → 고정 위치 흐름으로 */
