@@ -88,7 +88,8 @@ export function createPeople(smoke, { listener, trays = [] } = {}) {
           }
           st.k = k;
           st.inhale = inhale;
-          if (st.len <= 0) { // 다 폈으면 재떨이에 비벼 끄고 잠깐 쉼
+          if (st.len <= 0) { // 다 폈으면 (빨던 중이면 마지막 모금 내뱉고) 재떨이에 비벼 끄고 잠깐 쉼
+            if (inhale) n.exhaleAt = t + 0.3;
             st.c = 0; st.k = 0; n.restUntil = t + 15 + Math.random() * 25;
             const tray = trays.reduce((b, tr) => (!b || Math.hypot(tr.x - n.cfg.x, tr.z - n.cfg.z) < Math.hypot(b.x - n.cfg.x, b.z - n.cfg.z) ? tr : b), null);
             tray?.addButt(undefined, undefined, true);
@@ -106,7 +107,7 @@ export function createPeople(smoke, { listener, trays = [] } = {}) {
         if (n.exhaleAt > 0 && t > n.exhaleAt) {
           n.exhaleAt = -1;
           if (Math.random() < 0.2) n.av.ring(0.9);
-          else n.av.puff(0.9 + Math.random() * 0.4);
+          else n.av.exhale(0.35 + Math.random() * 0.45, Math.random() < 0.15);
           sfx.exhale(0.8, dist(n));
         }
       }

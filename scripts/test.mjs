@@ -62,6 +62,13 @@ console.log('\n[Smoker 상태 머신]');
   sm.release('puff');
   const ex = ev.filter((e) => e[0] === 'exhale').at(-1);
   ok(ex && ex[1].type === 'puff', '1초 빨고 떼면 후~(puff)');
+  sm.press('puff'); step(sm, 0.5); sm.release('puff');
+  const vShort = ev.at(-1)[1].v;
+  step(sm, 2);
+  sm.press('puff'); step(sm, 2.4); sm.release('puff');
+  const vLong = ev.at(-1)[1].v;
+  ok(vShort < 0.3 && vLong > 0.9, '빤 시간만큼 연기 양: 0.5초 → 적게, 2.4초 → 최대', `short ${vShort.toFixed(2)} long ${vLong.toFixed(2)}`);
+  step(sm, 2);
   const nEx = ev.filter((e) => e[0] === 'exhale').length;
   sm.press('ring'); step(sm, 0.1); sm.release('ring');
   ok(ev.filter((e) => e[0] === 'exhale').length === nEx, '0.1초 톡은 내뱉기 없음');
@@ -84,6 +91,16 @@ console.log('\n[Smoker 상태 머신]');
   ok(ev.some((e) => e[0] === 'ash' && !e[1].flicked), '재가 2.4cm 넘으면 저절로 떨어짐');
   sm.len = 0.001; step(sm, 1);
   ok(sm.state === 'done' && ev.some((e) => e[0] === 'finished'), '다 타면 done');
+  {
+    const b = mk();
+    light(b.sm);
+    b.sm.len = 0.05;
+    b.sm.press('puff'); step(b.sm, 1.5); // 빨던 중에 다 탐
+    const last = b.ev.at(-1);
+    ok(b.sm.state === 'done' && last[0] === 'exhale' && last[1].last && last[1].v > 0.2, '빨던 중에 다 타면 마지막 모금은 내뱉고 끝', JSON.stringify(last));
+    b.sm.release('puff');
+    ok(b.ev.filter((e) => e[0] === 'exhale' && e[1].last).length === 1, '그 뒤 손 떼도 두 번 뱉지 않음');
+  }
   sm.context({ ashtrayDist: 0.6, trayIdx: 2 });
   const b = ev.at(-1);
   ok(b[0] === 'butt' && b[1].inTray && b[1].tray === 2, '재떨이 근처에서 버리면 재떨이로(tray 번호 포함)');

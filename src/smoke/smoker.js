@@ -80,7 +80,8 @@ export class Smoker {
     this.holding = null;
     if (this.state === 'lit' && this.inhale > 0.22) {
       const type = kind === 'ring' && this.inhale > 0.45 ? 'ring' : 'puff';
-      this.on('exhale', { type, k: 0.55 + this.inhale * 0.9 });
+      const v = Math.min(1, Math.max(0.08, this.inhaleTime / 2.4)); // 빤 시간만큼 연기 양
+      this.on('exhale', { type, k: 0.55 + this.inhale * 0.9, v, nose: v > 0.6 && Math.random() < 0.35 });
     }
     this.inhale = 0;
   }
@@ -149,10 +150,17 @@ export class Smoker {
     if (this.ash > ASH_DROP) { this.on('ash', { amount: this.ash, flicked: false }); this.ash = 0; }
     if (this.len <= 0) {
       this.len = 0;
+      // 마지막 모금: 빨던 중이었으면 들이마신 만큼 내뱉고 끝
+      const lastKind = this.holding;
+      const lastInhale = this.inhale, lastTime = this.inhaleTime;
       this.state = 'done';
       this.holding = null;
       this.inhale = 0;
       this.on('finished', {});
+      if (lastKind && lastInhale > 0.12) {
+        const v = Math.min(1, Math.max(0.08, lastTime / 2.4));
+        this.on('exhale', { type: 'puff', k: 0.55 + lastInhale * 0.9, v, nose: false, last: true });
+      }
     }
   }
 }

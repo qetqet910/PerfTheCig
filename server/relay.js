@@ -72,7 +72,7 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
         const { name, color, ...st } = me;
         broadcast({ t: 'state', ...st }, id);
       } else if (m.t === 'puff' && Array.isArray(m.p) && Array.isArray(m.d)) {
-        broadcast({ t: 'puff', id, p: m.p.slice(0, 3).map((v) => num(v, 2000)), d: m.d.slice(0, 3).map((v) => num(v, 10)), k: num(m.k, 3) }, id);
+        broadcast({ t: 'puff', id, p: m.p.slice(0, 3).map((v) => num(v, 2000)), d: m.d.slice(0, 3).map((v) => num(v, 10)), k: num(m.k, 3), v: Math.max(0, num(m.v ?? 0.5, 1)), nose: !!m.nose }, id);
       } else if (m.t === 'ev' && EV_KINDS.has(m.kind)) {
         const out = { t: 'ev', id, kind: m.kind };
         if (Array.isArray(m.p)) out.p = m.p.slice(0, 3).map((v) => num(v, 2000));

@@ -370,18 +370,21 @@ export class Avatar {
     this.bubbleUntil = this.clock + Math.min(6, 2.5 + text.length * 0.12);
   }
 
-  /** 입에서 후~ */
-  puff(strength = 1) {
-    if (!this.smoke) return null;
-    const p = this.mouth.getWorldPosition(new THREE.Vector3());
-    const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.root.quaternion);
-    p.addScaledVector(dir, 0.04);
-    dir.y += 0.25;
-    dir.normalize();
-    this.smoke.puff(p, dir, strength);
-    this.mouthOUntil = this.clock + 1.2;
-    return { p, dir };
+  /** 입에서 후~ (v = 빤 양 0..1, 입을 따라가며 흘러나옴) */
+  exhale(v = 0.5, nose = false) {
+    if (!this.smoke) return;
+    const o = { p: new THREE.Vector3(), d: new THREE.Vector3() };
+    this.smoke.exhale(() => {
+      this.mouth.getWorldPosition(o.p);
+      o.d.set(0, -0.12, 1).applyQuaternion(this.root.quaternion).normalize();
+      o.p.addScaledVector(o.d, 0.03);
+      return o;
+    }, v, { nose });
+    this.mouthOUntil = this.clock + 0.4 + v * 1.6;
   }
+
+  /** (호환) 세기 → 양 */
+  puff(strength = 1) { this.exhale(Math.min(1, Math.max(0.15, (strength - 0.4) / 1.1)), strength > 1.2 && Math.random() < 0.3); }
 
   /** 콜록콜록 (말풍선 + 몸 들썩 + 연기 조각) */
   cough() {
@@ -497,11 +500,11 @@ export class Avatar {
     }
     if (this.smoke && this.model.visible && c === 2) {
       this.ember.getWorldPosition(_c);
-      this.emitAcc += dt * (inh > 0.1 ? 3 : 10);
+      this.emitAcc += dt * (inh > 0.1 ? 4 : 11);
       while (this.emitAcc > 1) {
         this.emitAcc -= 1;
         _t.set((Math.random() - 0.5) * 0.02, 0.12 + Math.random() * 0.06, (Math.random() - 0.5) * 0.02);
-        this.smoke.emit(_c, _t, { size: 0.02, grow: 0.14, life: 3.2, alpha: 0.2 });
+        this.smoke.emit(_c, _t, { size: 0.035, grow: 0.3, life: 3.8, alpha: 0.1 });
       }
     }
     this.updateLabels();

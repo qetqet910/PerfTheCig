@@ -111,8 +111,7 @@ export class FirstPerson {
     this.chunks = [];       // 떨어지는 재 덩어리
     this.chunkGeo = new THREE.CylinderGeometry(0.0034, 0.003, 1, 7);
     this.chunkMat = new THREE.MeshStandardMaterial({ color: 0x9a9690, roughness: 1 });
-    // 내뱉기: 한 번에 터지지 않고 길게 흘러나옴 + 잔연기
-    this.streams = [];
+
     this._v = new THREE.Vector3();
     this._v2 = new THREE.Vector3();
   }
@@ -130,8 +129,16 @@ export class FirstPerson {
       else {
         dir.y -= 0.12;
         dir.normalize();
-        this.smoke.puff(p, dir, data.k * 0.45);                       // 첫 후~
-        this.streams.push({ t: 0, dur: 0.6 + data.k * 0.5, k: data.k, acc: 0 }); // 이어서 흘러나옴
+        // 입 위치를 매 프레임 따라감 (걸으면서/고개 돌리면서 뱉어도 자연스럽게)
+        const mouth = { p: new THREE.Vector3(), d: new THREE.Vector3() };
+        this.smoke.exhale(() => {
+          cam.getWorldDirection(mouth.d);
+          mouth.p.copy(cam.position).addScaledVector(mouth.d, 0.16);
+          mouth.p.y -= 0.075;
+          mouth.d.y -= 0.15;
+          mouth.d.normalize();
+          return mouth;
+        }, data.v, { nose: data.nose });
       }
       data.p = p.clone();
       data.d = dir.clone();
@@ -199,36 +206,7 @@ export class FirstPerson {
       return false;
     });
 
-    // 길게 흘러나오는 날숨 + 끝나고 코/입으로 남는 잔연기
-    const cam = this.camera;
-    for (const st of this.streams) {
-      st.t += dt;
-      const f = 1 - st.t / st.dur;
-      if (f <= 0) continue;
-      st.acc += dt * 60 * f;
-      const dir = cam.getWorldDirection(this._v2).clone();
-      dir.y -= 0.18;
-      dir.normalize();
-      const p = this._v.copy(cam.position).addScaledVector(dir, 0.2);
-      p.y -= 0.07;
-      while (st.acc > 1) {
-        st.acc -= 1;
-        const v = dir.clone().multiplyScalar((0.35 + Math.random() * 0.5) * st.k * (0.4 + f));
-        v.x += (Math.random() - 0.5) * 0.12; v.y += (Math.random() - 0.4) * 0.1; v.z += (Math.random() - 0.5) * 0.12;
-        this.smoke.emit(p, v, { size: 0.05, grow: 0.42, life: 4.2, alpha: 0.075 + 0.05 * f });
-      }
-    }
-    // 잔연기: 스트림 끝난 뒤 1초 정도 가늘게
-    for (const st of this.streams) {
-      if (st.t > st.dur && st.t < st.dur + 1.2) {
-        if (Math.random() < dt * 14) {
-          const p = this._v.copy(cam.position).addScaledVector(cam.getWorldDirection(this._v2), 0.15);
-          p.y -= 0.06;
-          this.smoke.emit(p, this._v2.set((Math.random() - 0.5) * 0.04, 0.06, (Math.random() - 0.5) * 0.04), { size: 0.02, grow: 0.15, life: 2.2, alpha: 0.08 });
-        }
-      }
-    }
-    this.streams = this.streams.filter((st) => st.t < st.dur + 1.2);
+
   }
 
   enter() {
@@ -400,11 +378,11 @@ export class FirstPerson {
     // 불씨 연기
     if (sm.state === 'lit') {
       this.cig.tipWorld(this._v2);
-      this.emitAcc += dt * (sm.holding ? 3 : 9);
+      this.emitAcc += dt * (sm.holding ? 4 : 12);
       while (this.emitAcc > 1) {
         this.emitAcc -= 1;
         this._v.set((Math.random() - 0.5) * 0.02, 0.1 + Math.random() * 0.05, (Math.random() - 0.5) * 0.02);
-        this.smoke.emit(this._v2, this._v, { size: 0.015, grow: 0.12, life: 2.6, alpha: 0.18 });
+        this.smoke.emit(this._v2, this._v, { size: 0.03, grow: 0.28, life: 3.6, alpha: 0.1 });
       }
     }
   }

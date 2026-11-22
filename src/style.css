@@ -30,7 +30,6 @@ html, body { margin: 0; height: 100%; background: #07090f; overflow: hidden;
 body.fp .crosshair, body.fp .fp-hint { display: block; }
 body.fp.paused .pause { display: grid; }
 body.fp.paused .crosshair { display: none; }
-body.fp [data-key="o"] { opacity: .35; }
 .online { opacity: .8; }
 .online.on { color: #7fe0a8; }
 .online.on::before { content: '● '; font-size: 9px; vertical-align: 2px; }

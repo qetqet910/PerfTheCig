@@ -65,8 +65,9 @@ scene.add(kolon.group);
 const area = createSmokingArea({ envMap });
 scene.add(area.group);
 
-const smoke = new SmokeSystem(3200);
+const smoke = new SmokeSystem(1500); // 동시 입자 예산 (GPU 부담 때문에 이 선에서)
 smoke.roof = SHELTER;
+smoke.setLamps([new THREE.Vector3(-13.15, 6.3, -4.9), new THREE.Vector3(10.75, 6.3, 4.9)]); // 연기를 비추는 가로등
 scene.add(smoke.points);
 smoke.setViewport(innerHeight * renderer.getPixelRatio(), camera.fov);
 
@@ -89,7 +90,6 @@ world.add({ circles: PEOPLE.map((p) => [p.x, p.z, 0.4]) });
 
 // ---------- HUD 헬퍼 ----------
 const $ = (id) => document.getElementById(id);
-const btn = (k) => document.querySelector(`[data-key="${k}"]`);
 const office = createOffice({ toastsEl: $('toasts'), sfx });
 
 // ---------- 1인칭 + 흡연 ----------
@@ -129,7 +129,7 @@ const fp = new FirstPerson({
       case 'exhale':
         sfx.exhale(d.k);
         if (d.type === 'ring') net.send({ t: 'ev', kind: 'ring', p: d.p.toArray(), d: d.d.toArray(), k: d.k });
-        else net.send({ t: 'puff', p: d.p.toArray(), d: d.d.toArray(), k: d.k });
+        else net.send({ t: 'puff', p: d.p.toArray(), d: d.d.toArray(), k: d.k, v: d.v, nose: !!d.nose });
         break;
       case 'cough':
         sfx.cough();
@@ -174,29 +174,23 @@ const fp = new FirstPerson({
   },
 });
 
-function setFirstPerson(on) {
-  if (on === fp.active) return;
-  if (on) {
-    controls.enabled = false;
-    controls.autoRotate = false;
-    btn('o').classList.remove('on');
-    camera.fov = 70;
-    fp.enter();
-  } else {
-    fp.exit();
-    camera.fov = 48;
-    const me = fp.feet;
-    controls.target.set(me.x, 1.0, me.z);
-    camera.position.set(me.x - 3.5, 2.2, me.z + 3.8);
-    controls.enabled = true;
-  }
+/** 입장하면 1인칭 고정 (3인칭/시점 리셋 없음) */
+function enterFirstPerson() {
+  if (fp.active) return;
+  controls.enabled = false;
+  controls.autoRotate = false;
+  camera.fov = 70;
+  fp.enter();
   camera.updateProjectionMatrix();
   smoke.setViewport(innerHeight * renderer.getPixelRatio(), camera.fov);
-  document.body.classList.toggle('fp', on);
-  document.body.classList.toggle('paused', on && !fp.isLocked);
-  btn('f').classList.toggle('on', on);
-  myAvatar?.setBodyVisible(!on);
+  document.body.classList.add('fp');
+  document.body.classList.toggle('paused', !fp.isLocked);
+  myAvatar?.setBodyVisible(false); // 내 몸은 남들 화면에만
 }
+// 입장 전 배경: 흡연장 주위를 천천히 도는 카메라 (조작 불가)
+controls.enabled = false;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.25;
 $('pause').addEventListener('click', () => fp.lock());
 
 // ---------- 멀티 ----------
@@ -243,9 +237,9 @@ const net = new Net({
     Object.assign(r.st, { speed: m.s, k: m.k, inhale: m.inh, c: m.c, len: m.len, ash: m.ash });
   },
   puff: (m) => {
-    smoke.puff(new THREE.Vector3(...m.p), new THREE.Vector3(...m.d), m.k);
     const r = remotes.get(m.id);
-    if (r) { r.av.mouthOUntil = r.av.clock + 1.2; sfx.exhale(m.k, remoteDist(r)); }
+    if (r) { r.av.exhale(m.v ?? 0.5, !!m.nose); sfx.exhale(m.k, remoteDist(r)); }
+    else smoke.puff(new THREE.Vector3(...m.p), new THREE.Vector3(...m.d), m.k);
   },
   ev: (m) => {
     const r = remotes.get(m.id);
@@ -312,7 +306,7 @@ function join() {
   net.connect(profile.name, profile.color);
   document.body.classList.add('joined');
   office.start(profile.name);
-  setFirstPerson(true);
+  enterFirstPerson();
 }
 $('enter').addEventListener('click', join);
 nickEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); join(); } });
@@ -363,17 +357,10 @@ chatInput.addEventListener('blur', () => {
 
 // ---------- 단축키 ----------
 let wet = 1;
-const actions = {
-  f: () => myAvatar && setFirstPerson(!fp.active),
-  o: () => { if (fp.active) return; controls.autoRotate = !controls.autoRotate; btn('o').classList.toggle('on', controls.autoRotate); },
-  c: () => { if (fp.active) fp.respawn(); else { camera.position.copy(HOME.pos); controls.target.copy(HOME.target); } },
-};
 addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement || e.repeat) return;
-  if (e.key === 'Enter') { e.preventDefault(); openChat(); return; }
-  actions[e.code.replace('Key', '').toLowerCase()]?.(); // 한글 입력 상태에서도 동작
+  if (e.key === 'Enter') { e.preventDefault(); openChat(); }
 });
-document.querySelectorAll('[data-key]').forEach((b) => b.addEventListener('click', () => actions[b.dataset.key]()));
 
 const tickClock = () => {
   const d = new Date();
@@ -485,4 +472,4 @@ addEventListener('resize', () => {
 });
 
 // 디버그용
-Object.assign(window, { scene, camera, controls, fp, setFirstPerson, net, remotes, people, area, PACK_SIZE });
+Object.assign(window, { scene, camera, controls, fp, enterFirstPerson, net, remotes, people, area, smoke, PACK_SIZE });
