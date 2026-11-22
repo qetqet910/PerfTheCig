@@ -74,7 +74,7 @@ export class FirstPerson {
       if (e.code === 'Space') {
         e.preventDefault();
         if (this.seat) this.stand();
-        else if (this.jumpY <= 0 && this.jumpV === 0) this.jumpV = 3.3; // 약 55cm
+        else if (this.jumpY <= 0 && this.jumpV === 0) this.jumpV = 3.6; // 약 32cm, 체공 0.33초
       }
       const tk = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code);
       if (tk >= 0) this.startTrick(tk);
@@ -440,10 +440,12 @@ export class FirstPerson {
     // 점프
     if (this.jumpV !== 0 || this.jumpY > 0) {
       this.jumpY += this.jumpV * dt;
-      this.jumpV -= 9.8 * dt;
+      // 올라갈 땐 20, 내려올 땐 32 → 둥실 뜨지 않고 툭 떨어짐
+      this.jumpV -= (this.jumpV > 0 ? 20 : 32) * dt;
       if (this.jumpY <= 0) {
         const hard = this.jumpV < -2;
         this.jumpY = 0; this.jumpV = 0;
+        this.landDip = 0.035; // 착지할 때 살짝 내려앉음
         this.onStep?.(hard ? 'land' : 'step', this.feet);
       }
     }
@@ -455,7 +457,9 @@ export class FirstPerson {
     }
     this.shake = Math.max(0, this.shake - dt);
     const sh = this.shake > 0 ? Math.sin(this.shake * 40) * 0.025 * Math.min(1, this.shake) : 0;
-    this.camera.position.set(this.feet.x, (this.seat ? EYE_SIT : EYE) + by + Math.abs(sh) + this.jumpY, this.feet.z);
+    this.landDip = Math.max(0, (this.landDip || 0) - dt * 0.25);
+    const dip = this.landDip > 0 ? Math.sin((this.landDip / 0.035) * Math.PI) * this.landDip : 0;
+    this.camera.position.set(this.feet.x, (this.seat ? EYE_SIT : EYE) + by + Math.abs(sh) + this.jumpY - dip, this.feet.z);
 
     // --- 묘기 진행: 한 모금 빨아들임(prep) → 연출 ---
     let trickRaise = 0;
