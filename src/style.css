@@ -118,3 +118,9 @@ body.denied .deniedBox { display: grid; }
 /* 브라우저 드래그 동작 막기 (Whale 드래그 검색 / 이미지·글자 끌기 / 텍스트 선택) */
 html, body, #app, #hud, canvas { user-select: none; -webkit-user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none; }
 input { user-select: text; -webkit-user-select: text; }
+
+/* 눈뭉치 맞았을 때 화면에 철퍽 */
+.splat { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 1.2s ease-out;
+  background: radial-gradient(circle at 42% 38%, rgba(255,255,255,.95) 0 12%, rgba(240,246,255,.75) 18%, rgba(255,255,255,0) 42%),
+              radial-gradient(circle at 60% 55%, rgba(255,255,255,.8) 0 6%, rgba(255,255,255,0) 20%); }
+body.splat .splat { opacity: 1; transition: none; }

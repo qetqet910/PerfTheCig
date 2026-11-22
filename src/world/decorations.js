@@ -11,6 +11,8 @@ import { SHELTER } from './smokingArea.js';
 export function createDecorations() {
   const group = new THREE.Group();
   const circles = [], boxes = [];
+  // 상호작용용 참조 (interactions.js에서 사용)
+  const refs = { umbrellas: [], posters: [], parcels: [], bags: [], snowPlanes: [] };
   const M = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, ...extra });
   const add = (mesh, x, y, z, parent = group) => {
     mesh.position.set(x, y, z);
@@ -29,6 +31,8 @@ export function createDecorations() {
     add(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.03, 20), metal), 0, 0.015, 0, g);
     const cup = createPaperCup(1); cup.setFill(0.15); cup.group.position.set(0.1, 1.066, 0.05); g.add(cup.group);
     const cup2 = createPaperCup(1); cup2.setFill(0); cup2.group.position.set(-0.12, 1.066, -0.08); cup2.group.rotation.z = Math.PI / 2; cup2.group.position.y = 1.066 + 0.03; g.add(cup2.group);
+    refs.tableCups = [cup.group, cup2.group];
+    refs.table = g;
     const can = createDrink(DRINKS[2], 1); can.group.position.set(0.02, 1.066, -0.15); g.add(can.group);
     group.add(g);
     circles.push([-0.45, 2.7, 0.33]);
@@ -49,6 +53,7 @@ export function createDecorations() {
       u.position.set(x, 0, z);
       u.rotation.set(tilt, 0, tilt * 0.6);
       g.add(u);
+      refs.umbrellas.push({ group: u, color: c });
     });
     group.add(g);
     circles.push([2.15, 5.6, 0.17]);
@@ -60,6 +65,7 @@ export function createDecorations() {
     const tape = M(0xc8b088, { roughness: 0.6 });
     [[-1.1, 0.2, 5.55, 0.5, 0.4, 0.4, 0.1], [-1.05, 0.55, 5.6, 0.4, 0.3, 0.32, -0.15], [-0.6, 0.15, 5.6, 0.36, 0.3, 0.3, 0.3]].forEach(([x, y, z, w, h, d, r]) => {
       const b = add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), box), x, y, z);
+      refs.parcels.push(b);
       b.rotation.y = r;
       const t = new THREE.Mesh(new THREE.BoxGeometry(w + 0.002, 0.004, 0.06), tape);
       t.position.y = h / 2;
@@ -76,6 +82,7 @@ export function createDecorations() {
     const bag = M(0xe8e4c8, { roughness: 0.4, metalness: 0.05, transparent: true, opacity: 0.92 });
     [[8.3, 0.22, -5.4, 0.26], [8.65, 0.2, -5.5, 0.23], [8.45, 0.5, -5.45, 0.2]].forEach(([x, y, z, r]) => {
       const b = add(new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), bag), x, y, z);
+      refs.bags.push(b);
       b.scale.set(1, 1.15, 0.9);
       const knot = add(new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.1, 8), bag), 0, r * 1.1, 0, b);
       knot.scale.set(1, 1, 1);
@@ -87,6 +94,7 @@ export function createDecorations() {
   {
     const g = new THREE.Group();
     g.position.set(2.85, 0, 5.82);
+    refs.extinguisher = g;
     const boxM = M(0xc8202a, { roughness: 0.5 });
     add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 0.18), boxM), 0, 0.75, 0, g);
     const glass = add(new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.42), new THREE.MeshStandardMaterial({ color: 0xcfe4f0, transparent: true, opacity: 0.2, roughness: 0.05 })), 0, 0.72, -0.091, g);
@@ -102,6 +110,7 @@ export function createDecorations() {
   const poster = (x, y, w, h, draw) => {
     const m = add(new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: canvasTexture(Math.round(w * 600), Math.round(h * 600), draw), roughness: 0.75 })), x, y, -5.84);
     m.castShadow = false;
+    refs.posters.push(m);
   };
   poster(2.1, 1.65, 0.6, 0.8, (c, w, h) => {
     c.fillStyle = '#f4f2ec'; c.fillRect(0, 0, w, h);
@@ -125,6 +134,7 @@ export function createDecorations() {
   {
     const g = new THREE.Group();
     g.position.set(6.2, 3.3, -5.85);
+    refs.cctv = g;
     add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.12), M(0xd8d8d8)), 0, 0, 0.06, g);
     const cam = add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.2, 14), M(0xeeeeee, { roughness: 0.4 })), 0, -0.06, 0.15, g);
     cam.rotation.set(Math.PI / 2 + 0.4, 0, 0.5);
@@ -157,6 +167,7 @@ export function createDecorations() {
   {
     const g = new THREE.Group();
     g.position.set(-5.05, 0, 4.7);
+    refs.heater = g;
     g.rotation.y = Math.PI / 2 + 0.4;
     const body = M(0xc8c4bc, { metalness: 0.3, roughness: 0.5 });
     add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.55, 20), body), 0, 0.32, 0, g);
@@ -172,6 +183,7 @@ export function createDecorations() {
   {
     const g = new THREE.Group();
     g.position.set(-10.6, 0, -5.55);
+    refs.bike = g;
     const frameM = M(0x2a6a4a, { metalness: 0.5, roughness: 0.4 });
     const tire = M(0x111111, { roughness: 0.9 });
     for (const x of [-0.5, 0.5]) {
@@ -219,6 +231,8 @@ export function createDecorations() {
     const scarf = add(new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.035, 8, 20), M(0xc82a2a)), 0, 0.98, 0, snowman);
     scarf.rotation.x = Math.PI / 2;
     const cig = createCigarette({ radius: 0.006 });
+    refs.snowmanCig = cig;
+    refs.snowman = snowman;
     cig.setLength(0.6); cig.setLit(true);
     cig.group.position.set(0.05, 1.08, 0.16);
     cig.group.rotation.set(-1.9, 0, 0.3);
@@ -241,12 +255,14 @@ export function createDecorations() {
     m.renderOrder = 1;
     group.add(m);
     snowMats.push(mat);
+    refs.snowPlanes.push(m);
   };
   snowPatch(-27.5, SHELTER.x0, -23, 27, 'right');  // 통로 입구 쪽 광장 (가림막 서쪽 끝에서 시작)
   snowPatch(SHELTER.x1, 34, -6, 6, 'left');        // 통로 안쪽 (가림막 동쪽 끝에서 시작)
 
+  refs.clock = clockRef;
   return {
-    group,
+    group, refs,
     colliders: { circles, boxes },
     update() { clockRef.userData.tick(); },
     setSnow(k) {

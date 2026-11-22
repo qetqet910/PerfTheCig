@@ -19,6 +19,8 @@ import { createOffice } from './office.js';
 import { createCoffeeMachine, createDrinkMachine, SNACKS } from './world/vending.js';
 import { createSnow, currentWeather } from './fx/snow.js';
 import { createDecorations } from './world/decorations.js';
+import { createSnowballs } from './world/snowball.js';
+import { setupInteractions } from './world/interactions.js';
 import { DEVICES, HEAT_PUFFS } from './smoke/smoker.js';
 import { TRICKS } from './smoke/tricks.js';
 
@@ -171,6 +173,15 @@ const fp = new FirstPerson({
     else if (name === 'gum') office.toast('시스템', '담배 냄새가 좀 가셨다 (아마도)', true);
     else if (name === 'mask') office.toast('시스템', '마스크를 썼다… 담배는 어떻게 피우지', true);
     else if (name === 'wipe') office.toast('시스템', '손 닦았다. 담배 냄새는 그대로', true);
+    else if (name === 'throw') {
+      const d = camera.getWorldDirection(new THREE.Vector3());
+      const p = camera.position.clone().addScaledVector(d, 0.3);
+      p.y -= 0.08;
+      snowballs.throw(p, d, { mine: true, owner: 'me' });
+      net.send({ t: 'ev', kind: 'snowball', p: p.toArray(), d: d.toArray() });
+      sfx.whoosh();
+      fp.setItem(null);
+    }
     else if (name === 'open') sfx.canOpen();
     else if (name === 'slurp') sfx.slurp();
     else if (name === 'gulp') sfx.gulp();
@@ -347,6 +358,8 @@ const net = new Net({
       case 'take': machines[m.machine]?.remoteTake(); break;
       case 'kick': machines[m.machine]?.remoteKick(); break;
       case 'toss': sfx.toss(dist); break;
+      case 'snowball': if (m.p && m.d) { snowballs.throw(new THREE.Vector3(...m.p), new THREE.Vector3(...m.d), { owner: m.id }); sfx.whoosh(); } break;
+      case 'deco': interactions.remote(m); break;
       case 'trick': if (r) { r.av.trick(m.idx, m.device && m.device !== 'cig' ? m.device : 'smoke'); sfx.exhale(0.8, dist); } break;
       case 'click': sfx.click(!!m.k, dist); break;
       case 'ring':
@@ -554,13 +567,13 @@ function updateHud(dt) {
   // 음료 들고 있으면 마시기 안내 덧붙임
   if (fp.item && fp.item.fill > 0.005 && !sm.holding) ctx += `${ctx ? ' · ' : ''}<kbd>휠↑</kbd>마시기`;
   // 조준 중인 대상(자판기·쓰레기통)이 있으면 그 안내가 우선
-  if (aimLabel) ctx = aimLabel.includes('좌클릭') ? `${L}${aimLabel.replace(' · 좌클릭', '')}` : aimLabel;
+  if (aimLabel) ctx = fmtAim(aimLabel);
   if (ctx !== lastCtx) { hud.ctx.innerHTML = ctx; hud.ctx.classList.toggle('show', !!ctx); lastCtx = ctx; }
 }
 
 // ---------- 조준 상호작용 (화면 가운데 점) ----------
 const raycaster = new THREE.Raycaster();
-raycaster.far = 1.7;
+raycaster.far = 2.4;
 const CENTER = new THREE.Vector2(0, 0);
 let aimLabel = null;
 // 분리수거함
@@ -569,7 +582,7 @@ for (const bin of area.bins) {
     mesh.userData.interact = {
       label: () => {
         const it = fp.item;
-        if (!it) return null;
+        if (!it || it.type === 'umbrella' || it.type === 'snowball') return null;
         const what = it.type === 'cup' ? '종이컵' : it.type === 'snack' ? `${it.drink.name} 봉지` : it.drink.name;
         const right = binRight(it, bin);
         return `${what} ${it.fill > 0.02 ? '(남은 거) ' : ''}${bin.label}에 버리기${right ? '' : ' (어… 여기 맞나?)'} · 좌클릭`;
@@ -597,7 +610,19 @@ for (const mesh of area.benchMeshes) {
     },
   };
 }
-const aimTargets = [...machines.flatMap((m) => m.interactables), ...area.bins.flatMap((b) => b.meshes), ...area.benchMeshes];
+// 눈싸움 + 흡연장 상호작용 (눈 뭉치기, NPC 말 걸기, 우산, 소화기, 벨, 눈사람 담배…)
+const snowballs = createSnowballs({
+  scene, smoke, colliders: world,
+  onHitMe: () => {
+    sfx.thud();
+    document.body.classList.add('splat');
+    setTimeout(() => document.body.classList.remove('splat'), 1400);
+    office.toast('시스템', ['으악 눈 맞았다', '누구야!', '목덜미에 눈 들어감'][Math.floor(Math.random() * 3)], true);
+  },
+  onSplat: (p) => sfx.thud(camera.position.distanceTo(p) + 2),
+});
+const interactions = setupInteractions({ scene, deco, people, fp, smoke, sfx, office, net, snowballs, camera });
+const aimTargets = [...machines.flatMap((m) => m.interactables), ...area.bins.flatMap((b) => b.meshes), ...area.benchMeshes, ...interactions.targets];
 function updateAim() {
   aimLabel = null;
   fp.interact = null;
@@ -606,10 +631,23 @@ function updateAim() {
   const hits = raycaster.intersectObjects(aimTargets, false);
   for (const h of hits) {
     const it = h.object.userData.interact;
-    const label = it?.label();
-    if (label) { aimLabel = label; if (label.includes('좌클릭')) fp.interact = it; break; }
+    if (!it) continue;
+    const l = it.label?.() || null, r = it.rlabel?.() || null;
+    if (!l && !r) continue;
+    aimLabel = [l, r && (it.rclick ? `${r} · 우클릭` : r)].filter(Boolean).join(' / ');
+    fp.interact = { click: l && l.includes('좌클릭') ? it.click : null, rclick: r && it.rclick ? it.rclick : null };
+    if (!fp.interact.click && !fp.interact.rclick) fp.interact = null;
+    break;
   }
   document.body.classList.toggle('aiming', !!fp.interact);
+}
+/** "문구 · 좌클릭 / 문구 · 우클릭" → 키 표시 HTML */
+function fmtAim(label) {
+  return label.split(' / ').map((part) => {
+    if (part.endsWith(' · 좌클릭')) return `<kbd>좌클릭</kbd>${part.slice(0, -6)}`;
+    if (part.endsWith(' · 우클릭')) return `<kbd>우클릭</kbd>${part.slice(0, -6)}`;
+    return part;
+  }).join(' · ');
 }
 function tossInto(bin) {
   const it = fp.item;
@@ -710,6 +748,11 @@ renderer.setAnimationLoop(() => {
   machines.forEach((m) => m.update(dt));
   if (!comboShown && fp.item?.type === 'cup' && fp.smoker.state === 'lit') { comboShown = true; office.toast('시스템', '커피 한 잔 + 담배 한 대. 직장인 세트 완성', true); }
   updateAim();
+  interactions.update(dt);
+  snowballs.update(dt, fp.active ? camera : null, [
+    ...interactions.npcTargets,
+    ...[...remotes.entries()].map(([id, r]) => ({ pos: r.av.root.position, owner: id, onHit: () => { r.av.say('으악!'); sfx.thud(remoteDist(r)); } })),
+  ]);
   people.update(t, dt);
   smoke.update(dt);
   rain.update(dt, camera);
@@ -729,4 +772,4 @@ addEventListener('resize', () => {
 });
 
 // 디버그용
-Object.assign(window, { scene, camera, controls, fp, enterFirstPerson, net, remotes, people, area, smoke, machines, wallet, PACK_SIZE });
+Object.assign(window, { scene, camera, controls, fp, enterFirstPerson, net, remotes, people, area, smoke, machines, wallet, deco, interactions, snowballs, PACK_SIZE });

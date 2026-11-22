@@ -120,6 +120,16 @@ export class Smoker {
     }
   }
 
+  /** 피우던 담배를 남(눈사람 등)에게 넘김: 꽁초 없이 손에서 사라짐 */
+  giveAway() {
+    if (this.state === 'none') return false;
+    this.state = 'none';
+    this.holding = null;
+    this.inhale = 0;
+    this.on('giveaway', {});
+    return true;
+  }
+
   press(kind) { if (this.canInhale) { this.holding = kind; this.inhaleTime = 0; } }
 
   release(kind) {

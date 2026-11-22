@@ -408,3 +408,60 @@ Object.assign(sfx, {
     noise({ dur: 0.08, type: 'lowpass', freq: 500, gain: 0.04 });
   },
 });
+
+Object.assign(sfx, {
+  /** 따릉따릉 */
+  bell(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    for (let i = 0; i < 2; i++) { tone({ freq: 2350, dur: 0.4, type: 'sine', gain: 0.06, at: i * 0.18, out }); tone({ freq: 3120, dur: 0.3, type: 'sine', gain: 0.03, at: i * 0.18, out }); }
+  },
+  /** 쉬익 (소화기) */
+  hiss(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    noise({ dur: 1.4, type: 'highpass', freq: 2500, gain: 0.12, attack: 0.03, out });
+  },
+  /** 끼익 (문) */
+  creak() { const o = tone({ freq: 320, dur: 0.5, type: 'sawtooth', gain: 0.02, slide: 1.5 }); void o; },
+  /** 눈 뭉치는 소리 */
+  pack() { for (let i = 0; i < 3; i++) noise({ dur: 0.05, type: 'bandpass', freq: 1500, q: 1.5, gain: 0.06, at: i * 0.09 }); },
+  /** 휙 (던지기) */
+  whoosh() { const n = noise({ dur: 0.18, type: 'bandpass', freq: 900, q: 0.8, gain: 0.07, attack: 0.02 }); if (n) n.f.frequency.exponentialRampToValueAtTime(2200, n.t0 + 0.15); },
+  /** 철퍽 (눈뭉치 맞음) */
+  thud(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    noise({ dur: 0.12, type: 'lowpass', freq: 900, gain: 0.12, out });
+    noise({ dur: 0.08, type: 'bandpass', freq: 2500, q: 1, gain: 0.05, at: 0.01, out });
+  },
+});
+
+// 눈 밟는 소리: "뽀드득" — 발진기 없이 잡음 알갱이만 (예전 버전은 떨림 장치가 볼륨을 크게 흔들어 소리가 깨졌음)
+Object.assign(sfx, {
+  snowStep() {
+    if (!ensure()) return;
+    const t0 = ctx.currentTime + 0.005;
+    const dur = 0.13 + Math.random() * 0.04;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    // 눌리면서 소리가 위로 쓸려 올라감 (뽀 → 드득)
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.6;
+    bp.frequency.setValueAtTime(650 + Math.random() * 150, t0);
+    bp.frequency.exponentialRampToValueAtTime(1500 + Math.random() * 400, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    // 알갱이 6~9개: 짧게 켜졌다 꺼졌다 (부드러운 램프라 튀지 않음)
+    const grains = 6 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < grains; i++) {
+      const gt = t0 + (i / grains) * dur + Math.random() * 0.006;
+      const peak = (0.022 + Math.random() * 0.016) * (1 - i / grains * 0.5);
+      g.gain.linearRampToValueAtTime(peak, gt + 0.003);
+      g.gain.linearRampToValueAtTime(0.002, gt + 0.011);
+    }
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.02);
+    src.connect(bp).connect(g).connect(master);
+    src.start(t0, Math.random() * 1.5);
+    src.stop(t0 + dur + 0.05);
+    noise({ dur: 0.08, type: 'lowpass', freq: 420, gain: 0.014, attack: 0.006 }); // 꾹 눌리는 저음
+  },
+});

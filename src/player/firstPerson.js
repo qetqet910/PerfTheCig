@@ -3,6 +3,7 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { createCigarette, createLighter, createHeatDevice, createVape } from '../smoke/props.js';
 import { TRICKS, performTrick } from '../smoke/tricks.js';
 import { SNACKS } from '../world/items.js';
+import { createSnowballMesh, createUmbrellaMesh } from '../world/snowball.js';
 import { Smoker } from '../smoke/smoker.js';
 import { createPaperCup, createDrink, COFFEE_MENU, DRINKS } from '../world/items.js';
 
@@ -106,7 +107,11 @@ export class FirstPerson {
       if (e.button === 2) e.preventDefault();
       if (!this.active || !this.controls.isLocked || (e.button !== 0 && e.button !== 2)) return;
       const sm = this.smoker;
-      if (e.button === 0 && this.interact) { this.interact.click(); this.downAt[0] = -1; return; } // 자판기/쓰레기통 등
+      // 조준 중인 대상 (자판기·쓰레기통·눈사람…): 좌클릭/우클릭 동작이 있으면 그게 우선
+      if (e.button === 0 && this.interact?.click) { this.interact.click(); this.downAt[0] = -1; return; }
+      if (e.button === 2 && this.interact?.rclick) { this.interact.rclick(); this.downAt[2] = -1; return; }
+      // 눈뭉치 들고 있으면 좌클릭 = 던지기
+      if (e.button === 0 && this.item?.type === 'snowball') { this.onItemEvent?.('throw', this.item); this.downAt[0] = -1; return; }
       this.downAt[e.button] = performance.now();
       if (sm.state === 'none' || sm.state === 'done') {
         sm.context(this.getContext());
@@ -285,6 +290,14 @@ export class FirstPerson {
       cup.setFill(item.fill);
       vm.add(cup.group);
       this.itemObj = cup;
+    } else if (item.type === 'umbrella') {
+      const u = createUmbrellaMesh(item.color, 1);
+      vm.add(u.group);
+      this.itemObj = u;
+    } else if (item.type === 'snowball') {
+      const b = createSnowballMesh(1);
+      vm.add(b.group);
+      this.itemObj = b;
     } else {
       const can = createDrink(item.drink, 1);
       vm.add(can.group);
@@ -394,8 +407,8 @@ export class FirstPerson {
       k: this.vmT,
       inh: sm.holding ? sm.inhale : 0,
       c: sm.code, len: sm.len, ash: sm.ash,
-      it: this.item ? ({ cup: 1, can: 2, snack: 3 })[this.item.type] : 0,
-      ii: this.item ? (this.item.type === 'cup' ? COFFEE_MENU.findIndex((m) => m.name === this.item.name) : this.item.type === 'snack' ? SNACKS.indexOf(this.item.drink) : DRINKS.indexOf(this.item.drink)) : -1,
+      it: this.item ? ({ cup: 1, can: 2, snack: 3, umbrella: 4, snowball: 5 })[this.item.type] : 0,
+      ii: this.item ? (this.item.type === 'umbrella' ? this.item.idx : this.item.type === 'snowball' ? 0 : this.item.type === 'cup' ? COFFEE_MENU.findIndex((m) => m.name === this.item.name) : this.item.type === 'snack' ? SNACKS.indexOf(this.item.drink) : DRINKS.indexOf(this.item.drink)) : -1,
       if: this.item ? this.item.fill : 0,
       sp: this.sipT,
     };
@@ -574,7 +587,7 @@ export class FirstPerson {
     if (this.item && this.itemVm) {
       const it = this.item;
       const emit = (n) => this.onItemEvent?.(n, it);
-      const use = it.type === 'snack' ? it.drink.use : it.type === 'cup' ? 'sip' : 'drink';
+      const use = it.type === 'snack' ? it.drink.use : it.type === 'cup' ? 'sip' : it.type === 'umbrella' ? 'twirl' : it.type === 'snowball' ? 'throw' : 'drink';
       const wantSip = (performance.now() < this.wheelUntil || k.has('KeyF')) && it.fill > 0.005 && sm.t > this.sipBlock;
       // 핫팩은 입으로 안 가져가고 손에서 흔들기만
       const lift = use === 'warm' ? 0.25 : 1;
@@ -588,7 +601,13 @@ export class FirstPerson {
       const tiltDrink = use === 'sip' || use === 'drink';
       this.itemVm.rotation.set(THREE.MathUtils.lerp(0.08, tiltDrink ? 1.05 : 0.35, q), THREE.MathUtils.lerp(0.35, 0.05, q), THREE.MathUtils.lerp(0.1, 0, q));
       if (use === 'warm' && wantSip) this.itemVm.rotation.z += Math.sin(performance.now() * 0.03) * 0.25; // 흔들흔들
-      if (wantSip && q > 0.65 * lift) {
+      if (use === 'twirl') {
+        // 우산: 손잡이는 왼쪽 아래, 캐노피는 머리 위
+        this.itemVm.position.set(-0.17 - Math.cos(this.bob) * bobAmt * 0.4, -0.36 + by * 0.4, -0.22);
+        this.itemVm.rotation.set(-0.12, (this.itemVm.userData.spin = (this.itemVm.userData.spin || 0) + (wantSip ? dt * 6 : 0)), 0.14);
+      }
+      if (use === 'throw' && wantSip) { this.wheelUntil = 0; emit('throw'); }
+      if (wantSip && q > 0.65 * lift && use !== 'twirl' && use !== 'throw') {
         if ((use === 'drink') && !it.opened) { it.opened = true; emit(it.drink.kind === 'bottle' ? 'cap' : 'open'); this.sipBlock = sm.t + 0.45; }
         else if (use === 'sip' && it.temp > 0.72 && !it.burned) { it.burned = true; emit('hot'); this.sipBlock = sm.t + 1.4; this.shake = 0.5; this.wheelUntil = 0; }
         else if (use === 'sip' || use === 'drink') {

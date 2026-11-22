@@ -3,6 +3,8 @@ import { bubbleTexture, nameTexture } from '../util.js';
 import { createCigarette, createLighter, createHeatDevice, createVape } from '../smoke/props.js';
 import { createPaperCup, createDrink, COFFEE_MENU, DRINKS, SNACKS } from './items.js';
 import { performTrick } from '../smoke/tricks.js';
+import { createSnowballMesh, createUmbrellaMesh } from './snowball.js';
+const UMBRELLA_COLORS = [0x1d3a6b, 0xc82a2a, 0x222222];
 
 /**
  * 절차적 SD(2등신) 직장인 캐릭터.
@@ -381,6 +383,14 @@ export class Avatar {
       cup.setLiquid((COFFEE_MENU[idx] || COFFEE_MENU[0]).liquid);
       this.itemObj = cup;
       this.itemHolder.add(cup.group);
+    } else if (code === 4) {
+      const u = createUmbrellaMesh(UMBRELLA_COLORS[idx] ?? UMBRELLA_COLORS[0], 1.15);
+      this.itemObj = u;
+      this.itemHolder.add(u.group);
+    } else if (code === 5) {
+      const b = createSnowballMesh(1.4);
+      this.itemObj = b;
+      this.itemHolder.add(b.group);
     } else if (code === 3) {
       const d = createDrink(SNACKS[idx] || SNACKS[0], 1.35);
       this.itemObj = d;

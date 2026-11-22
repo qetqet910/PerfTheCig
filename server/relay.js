@@ -12,7 +12,7 @@ import { WebSocketServer } from 'ws';
 const MAX_PLAYERS = 40;
 const MAX_PER_SESSION = 5; // 같은 브라우저(세션 ID)에서 동시에 들어올 수 있는 창 수
 const MAX_BUTTS = 500;
-const EV_KINDS = new Set(['click', 'lit', 'ring', 'cough', 'ash', 'butt', 'borrow', 'vend', 'take', 'kick', 'toss', 'trick']);
+const EV_KINDS = new Set(['click', 'lit', 'ring', 'cough', 'ash', 'butt', 'borrow', 'vend', 'take', 'kick', 'toss', 'trick', 'deco', 'snowball']);
 const COLORS = /^#[0-9a-f]{6}$/i;
 const num = (v, lim = 1e4) => (Number.isFinite(v) ? Math.max(-lim, Math.min(lim, v)) : 0);
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
