@@ -504,7 +504,7 @@ function updateHud(dt) {
   // 상황별 안내
   const f = fp.feet;
   const tray = nearestAshtray(f.x, f.z).dist < 1.1;
-  const L = '<kbd>좌클릭</kbd>', R = '<kbd>우클릭</kbd>';
+  const L = '<kbd>좌클릭</kbd>', R = '<kbd>우클릭/Q</kbd>';
   let ctx = '';
   const dev = sm.device;
   if (fp.seat && !sm.holding) ctx = '<kbd>WASD</kbd>일어나기';

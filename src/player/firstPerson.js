@@ -30,6 +30,7 @@ export class FirstPerson {
     this.itemObj = null;
     this.sipT = 0;
     this.wheelUntil = 0;
+    this.qDownAt = -1;
     this.sipBlock = 0;
     this.slurpAcc = 0;
     this.steamAcc = 0;
@@ -58,7 +59,12 @@ export class FirstPerson {
       if (!this.active || typing(e) || e.repeat) return;
       this.keys.add(e.code);
       if (e.code === 'KeyE') this.smoker.press('puff');
-      if (e.code === 'KeyQ') this.smoker.press('ring');
+      if (e.code === 'KeyQ') {
+        this.qDownAt = performance.now();
+        const sm = this.smoker;
+        if (sm.state === 'done') { sm.context(this.getContext()); this.qDownAt = -1; }
+        else if (sm.state === 'lit') sm.press('ring');
+      }
       if (e.code === 'KeyG') this.smoker.context(this.getContext());
       if (e.code === 'KeyX') this.smoker.flick();
       const tk = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
@@ -67,16 +73,28 @@ export class FirstPerson {
     addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
       if (e.code === 'KeyE') this.smoker.release('puff');
-      if (e.code === 'KeyQ') this.smoker.release('ring');
+      if (e.code === 'KeyQ') {
+        const tap = this.qDownAt > 0 && performance.now() - this.qDownAt < 230;
+        this.qDownAt = -1;
+        this.smoker.release('ring');
+        if (tap && this.smoker.state === 'lit') this.smoker.context(this.getContext());
+      }
     });
     addEventListener('blur', () => this.clearInput());
-    dom.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 우클릭: 메뉴/브라우저 마우스 제스처(Whale 등) 최대한 막기
+    const blockRight = (e) => { if (e.button === 2 || e.type === 'contextmenu') { e.preventDefault(); e.stopPropagation(); } };
+    dom.addEventListener('contextmenu', blockRight);
+    dom.addEventListener('pointerdown', blockRight);
+    dom.addEventListener('pointerup', blockRight);
+    dom.addEventListener('auxclick', blockRight);
+    addEventListener('contextmenu', (e) => { if (this.active) e.preventDefault(); }, { capture: true });
     // 마우스만으로 흡연:
     //   담배 없음/다 핌: 좌·우클릭 = 꺼내 물기 / 꽁초 버리기
     //   피우는 중: 좌클릭 꾹 = 빨기(떼면 후~), 톡 = 재 털기 / 우클릭 꾹 = 도넛, 톡 = 끄고 버리기
     this.downAt = [-1, -1, -1];
     const TAP = 230;
     dom.addEventListener('mousedown', (e) => {
+      if (e.button === 2) e.preventDefault();
       if (!this.active || !this.controls.isLocked || (e.button !== 0 && e.button !== 2)) return;
       const sm = this.smoker;
       if (e.button === 0 && this.interact) { this.interact.click(); this.downAt[0] = -1; return; } // 자판기/쓰레기통 등
