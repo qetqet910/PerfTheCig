@@ -178,7 +178,7 @@ console.log('\n[궐련형 / 액상 전자담배]');
 // ---------------------------------------------------------------- Relay
 console.log('\n[멀티플레이 릴레이]');
 const server = http.createServer();
-attachRelay(server, { log: () => {} });
+attachRelay(server, { log: () => {}, maxPerIp: Infinity }); // 기존 테스트는 전부 127.0.0.1이라 IP 제한 끔
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const url = `ws://127.0.0.1:${server.address().port}/ws`;
 const client = (name) => new Promise((res) => {
@@ -243,6 +243,32 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   [...cs, sixth, other, again].forEach((c) => c.ws.close());
 }
 server.close();
+
+{
+  // IP당 1명 제한 (Render처럼 프록시가 x-forwarded-for 끝에 실제 IP를 붙인다고 가정)
+  const srv = http.createServer();
+  attachRelay(srv, { log: () => {}, maxPerIp: 1 });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const u = `ws://127.0.0.1:${srv.address().port}/ws`;
+  const join = (xff, sid) => new Promise((res) => {
+    const ws = new WebSocket(u, xff ? { headers: { 'x-forwarded-for': xff } } : {});
+    ws.on('message', (d) => { const m = JSON.parse(d); if (m.t === 'welcome' || m.t === 'denied') res({ ws, m }); });
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', name: 'I', sid })));
+  });
+  const a1 = await join('1.1.1.1', 'a');
+  const a2 = await join('1.1.1.1', 'b');
+  ok(a1.m.t === 'welcome' && a2.m.t === 'denied' && a2.m.reason === 'ip', 'IP당 1명: 같은 IP 두 번째는 거절');
+  const b1 = await join('2.2.2.2', 'c');
+  ok(b1.m.t === 'welcome', 'IP당 1명: 다른 IP는 입장');
+  const spoof = await join('9.9.9.9, 1.1.1.1', 'd');
+  ok(spoof.m.t === 'denied', 'IP 속이기 방지: 헤더 앞에 가짜 IP를 넣어도 마지막(프록시가 붙인) IP로 판단');
+  a1.ws.close();
+  await sleep(150);
+  const a3 = await join('1.1.1.1', 'e');
+  ok(a3.m.t === 'welcome', 'IP당 1명: 먼저 들어온 사람이 나가면 다시 입장 가능');
+  [a2, b1, spoof, a3].forEach((c) => c.ws.close());
+  srv.close();
+}
 
 // ---------------------------------------------------------------- Collision
 console.log('\n[충돌]');

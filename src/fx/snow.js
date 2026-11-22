@@ -35,7 +35,7 @@ export function createSnow(count = 2600, { shelters = [] } = {}) {
       void main() {
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = (0.025 + aSeed * 0.03) * uScale / max(-mvPosition.z, 0.1);
+        gl_PointSize = (0.03 + aSeed * 0.035) * uScale / max(-mvPosition.z, 0.1);
         vA = 0.55 + aSeed * 0.45;
         #include <fog_vertex>
       }`,
@@ -92,13 +92,13 @@ export function createSnow(count = 2600, { shelters = [] } = {}) {
 }
 
 /**
- * 날씨: 모든 접속자가 같은 날씨를 보도록 현재 시각으로 결정 (10분마다 비 ↔ 눈).
+ * 날씨: 겨울이라 항상 눈. (예전엔 10분마다 비 ↔ 눈)
  * URL에 ?weather=snow / ?weather=rain 이면 고정 (테스트용).
  */
 const PERIOD = 10 * 60 * 1000;
 export function currentWeather(now = Date.now()) {
   const force = new URLSearchParams(location.search).get('weather');
   if (force === 'snow' || force === 'rain') return { kind: force, nextIn: Infinity };
-  const slot = Math.floor(now / PERIOD);
-  return { kind: slot % 2 === 0 ? 'rain' : 'snow', nextIn: PERIOD - (now % PERIOD) };
+  void now; void PERIOD;
+  return { kind: 'snow', nextIn: Infinity }; // 겨울: 눈만 내림
 }

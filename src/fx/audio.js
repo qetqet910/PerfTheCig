@@ -378,3 +378,33 @@ Object.assign(sfx, {
   /** 앉기 (벤치 삐걱) */
   sit() { tone({ freq: 210, dur: 0.25, type: 'triangle', gain: 0.04, slide: 0.8 }); noise({ dur: 0.1, type: 'lowpass', freq: 600, gain: 0.08 }); },
 });
+
+Object.assign(sfx, {
+  /** 쓱 (연기 다시 빨아들임) */
+  suck(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    const n = noise({ dur: 0.35, type: 'bandpass', freq: 1500, q: 1.2, gain: 0.1, attack: 0.05, out });
+    if (n) n.f.frequency.exponentialRampToValueAtTime(2600, n.t0 + 0.3);
+  },
+  /** 퐁 (도넛) */
+  pop(dist = 0) {
+    const out = at(dist); if (!out || out.gain.value < 0.01) return;
+    tone({ freq: 210, dur: 0.12, type: 'sine', gain: 0.07, slide: 0.6, out });
+    noise({ dur: 0.06, type: 'lowpass', freq: 500, gain: 0.08, out });
+  },
+  /** 뽀드득 (눈 밟기): 짧은 알갱이 여러 개 */
+  snowStep() {
+    const grains = 5 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < grains; i++) {
+      noise({ dur: 0.02 + Math.random() * 0.025, type: 'bandpass', freq: 900 + Math.random() * 2200, q: 2, gain: 0.05 + Math.random() * 0.05, at: i * (0.012 + Math.random() * 0.01) });
+    }
+    noise({ dur: 0.13, type: 'lowpass', freq: 700, gain: 0.05, attack: 0.01 });
+  },
+  /** 톡 (마른 바닥 발소리, 아주 작게) */
+  step() { noise({ dur: 0.05, type: 'lowpass', freq: 400 + Math.random() * 200, gain: 0.04 }); },
+  /** 찰박 (젖은 바닥) */
+  splash() {
+    noise({ dur: 0.12, type: 'bandpass', freq: 1800 + Math.random() * 800, q: 0.8, gain: 0.05, attack: 0.005 });
+    noise({ dur: 0.08, type: 'lowpass', freq: 500, gain: 0.04 });
+  },
+});

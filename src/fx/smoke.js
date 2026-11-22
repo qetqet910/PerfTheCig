@@ -16,7 +16,7 @@ import * as THREE from 'three';
  * 셰이더: 노이즈 텍스처 두 겹을 서로 다르게 돌려서 연기 속이 꿈틀거리게,
  *        가로등 위치 기준으로 가까울수록 밝게(빛 받은 연기).
  */
-const MODE = { SMOKE: 0, ASH: 1, BREATH: 2 };
+const MODE = { SMOKE: 0, ASH: 1, BREATH: 2, SINK: 3 }; // SINK: 무거운 연기 (폭포 묘기) — 아래로 흐르고 바닥에 깔림
 
 export class SmokeSystem {
   constructor(max = 2400) {
@@ -39,6 +39,7 @@ export class SmokeSystem {
     this.time = 0;
     this.streams = [];
     this.roof = null;
+    this.quality = 1; // 0.4~1, main이 프레임 시간 보고 조절 (setQuality)
     // 묘기용: 입자를 움직이는 목표(입/코)로 빨아들임
     this.attractId = new Int16Array(max).fill(-1);
     this.attractDelay = new Float32Array(max);
@@ -64,6 +65,7 @@ export class SmokeSystem {
         {
           uMap: { value: noiseTexture() },
           uScale: { value: 800 },
+          uMaxPx: { value: 380 },
           uTime: { value: 0 },
           uSide: { value: new THREE.Color(0.46, 0.5, 0.6) },     // 생연기: 푸르스름
           uBreath: { value: new THREE.Color(0.66, 0.66, 0.65) }, // 날숨: 밝은 회백색
@@ -73,15 +75,17 @@ export class SmokeSystem {
       ]),
       vertexShader: /* glsl */ `
         attribute float aSize; attribute float aAlpha; attribute float aSeed; attribute float aTint; attribute float aAge;
-        uniform float uScale;
+        uniform float uScale; uniform float uMaxPx;
         uniform vec3 uLampPos[2];
-        varying float vAlpha; varying float vSeed; varying float vTint; varying float vAge; varying float vLit;
+        varying float vAlpha; varying float vSeed; varying float vTint; varying float vAge; varying float vLit; varying float vNear;
         #include <fog_pars_vertex>
         void main() {
           vec4 world = modelMatrix * vec4(position, 1.0);
           vec4 mvPosition = viewMatrix * world;
           gl_Position = projectionMatrix * mvPosition;
-          gl_PointSize = aSize * uScale / max(-mvPosition.z, 0.05);
+          float dist = -mvPosition.z;
+          gl_PointSize = min(aSize * uScale / max(dist, 0.05), uMaxPx); // 입자 하나가 화면을 너무 크게 덮지 않게
+          vNear = smoothstep(0.12, 0.55, dist);                         // 눈앞 연기는 투명하게 빠짐
           // 가로등에 가까울수록 밝게 (아래쪽 원뿔 안이면 더)
           float lit = 0.0;
           for (int i = 0; i < 2; i++) {
@@ -96,7 +100,7 @@ export class SmokeSystem {
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap; uniform float uTime;
         uniform vec3 uSide; uniform vec3 uBreath; uniform vec3 uLampColor;
-        varying float vAlpha; varying float vSeed; varying float vTint; varying float vAge; varying float vLit;
+        varying float vAlpha; varying float vSeed; varying float vTint; varying float vAge; varying float vLit; varying float vNear;
         #include <fog_pars_fragment>
         mat2 rot(float a) { return mat2(cos(a), -sin(a), sin(a), cos(a)); }
         void main() {
@@ -110,7 +114,7 @@ export class SmokeSystem {
           // 가장자리는 부드럽게, 나이 들수록 더 성기게(흩어짐)
           float edge = 1.0 - smoothstep(0.2, 1.0, r);
           float body = smoothstep(0.38 + vAge * 0.22, 0.95, n);
-          float alpha = edge * body * body * vAlpha * 1.6;
+          float alpha = edge * body * body * vAlpha * 1.6 * vNear;
           if (alpha < 0.003) discard;
           vec3 base = mix(uSide, uBreath, vTint);
           vec3 col = base * (0.7 + 0.3 * n) + uLampColor * vLit * 0.18 * (0.6 + n);
@@ -126,6 +130,15 @@ export class SmokeSystem {
 
   setViewport(height, fov) {
     this.material.uniforms.uScale.value = height / (2 * Math.tan(THREE.MathUtils.degToRad(fov) / 2));
+    this.baseMaxPx = height * 0.38;
+    this.material.uniforms.uMaxPx.value = this.baseMaxPx;
+  }
+
+  /** 프레임 시간(ms) 평균으로 품질 조절: 느리면 방출량/크기 줄임 */
+  adapt(frameMs) {
+    const target = frameMs > 24 ? 0.45 : frameMs > 19 ? 0.7 : 1;
+    this.quality += (target - this.quality) * 0.05;
+    this.material.uniforms.uMaxPx.value = this.material.uniforms.uScale.value * 0.0 + this.baseMaxPx * (0.6 + 0.4 * this.quality);
   }
 
   /** 연기를 비추는 가로등 위치 (최대 2개) */
@@ -165,11 +178,14 @@ export class SmokeSystem {
     const { p, d } = origin();
     const tgt = this.addTarget(() => origin().p);
     const vel = new THREE.Vector3();
-    const n = Math.round(30 + 30 * v);
+    const n = Math.round(60 + 50 * v);
+    const off = new THREE.Vector3();
     for (let k = 0; k < n; k++) {
-      vel.copy(d).multiplyScalar(0.28 + Math.random() * 0.12);
-      vel.x += (Math.random() - 0.5) * 0.08; vel.y += (Math.random() - 0.5) * 0.06; vel.z += (Math.random() - 0.5) * 0.08;
-      this.emit(p, vel, { size: 0.05, grow: 0.12, life: 3, alpha: 0.1 + 0.05 * v, turb: 0.15, mode: MODE.BREATH, tint: 1, attract: tgt, delay: 0.85 + Math.random() * 0.15 });
+      // 반지름 3~5cm 공 안에 고르게 → 전부 같은 속도로 앞으로 (덩어리째 이동)
+      off.randomDirection().multiplyScalar(Math.cbrt(Math.random()) * (0.03 + 0.02 * v));
+      vel.copy(d).multiplyScalar(0.2).addScaledVector(off, 0.6);
+      vel.y += 0.01;
+      this.emit(p.clone().add(off), vel, { size: 0.04, grow: 0.05, life: 3, alpha: 0.18 + 0.06 * v, turb: 0.06, mode: MODE.BREATH, tint: 1, attract: tgt, delay: 1.0 + Math.random() * 0.08 });
     }
   }
 
@@ -177,6 +193,11 @@ export class SmokeSystem {
   french(origin, dur = 1.3) {
     const nose = this.addTarget(() => { const o = origin(); return o.p.clone().addScaledVector(o.d, 0.005).add(new THREE.Vector3(0, 0.04, 0)); });
     this.streams.push({ french: true, origin, nose, t: 0, dur, acc: 0, v: 0.5, linger: 0 });
+  }
+
+  /** 폭포: 무거운 연기가 입에서 턱을 타고 흘러내려 바닥에 깔림 */
+  waterfall(origin, dur = 1.6) {
+    this.streams.push({ sink: true, origin, t: 0, dur, acc: 0, v: 0.7, linger: 0 });
   }
 
   /** 용 콧김: 코로 두 줄기 세게 */
@@ -193,8 +214,10 @@ export class SmokeSystem {
   exhale(origin, v = 0.5, { nose = false, vapor = 'smoke' } = {}) {
     v = THREE.MathUtils.clamp(v, 0.05, 1);
     // 궐련형: 적고 금방 사라짐 / 액상: 많고 크고 오래감
-    const mul = vapor === 'heat' ? { n: 0.7, size: 0.9, life: 0.55, alpha: 0.85 } : vapor === 'vape' ? { n: 1.7, size: 1.35, life: 1.25, alpha: 1.15 } : { n: 1, size: 1, life: 1, alpha: 1 };
-    this.streams.push({ origin, v, t: 0, dur: (0.35 + v * 1.65) * (vapor === 'vape' ? 1.2 : 1), acc: 0, nose, linger: 1.4 + v, mul });
+    const mul = vapor === 'heat' ? { n: 0.7, size: 0.9, life: 0.55, alpha: 0.85, spread: 1, speed: 1 }
+      : vapor === 'vape' ? { n: 1.0, size: 2.3, life: 1.5, alpha: 1.45, spread: 1.6, speed: 1.15 }
+      : { n: 1, size: 1, life: 1, alpha: 1, spread: 1, speed: 1 };
+    this.streams.push({ origin, v, t: 0, dur: (0.35 + v * 1.65) * (vapor === 'vape' ? 1.35 : 1), acc: 0, nose, linger: 1.4 + v, mul });
   }
 
   /** (호환) 한 지점에서 한 번에 내뱉기 → 고정 위치 흐름으로 */
@@ -203,8 +226,30 @@ export class SmokeSystem {
     this.exhale(() => ({ p: P, d: D }), THREE.MathUtils.clamp((strength - 0.4) / 1.1, 0.1, 1));
   }
 
-  /** 도넛 연기: dir 방향으로 날아가며 천천히 커지는 고리 */
-  ring(p, dir, strength = 1) {
+  /** 도넛 연기: 진한 심 + 부드러운 테두리. speed로 속도 따로 지정 가능(연발에서 뒤 도넛이 앞 도넛 통과) */
+  ring(p, dir, strength = 1, { speed = null, radius = 0.035 } = {}) {
+    const d = dir.clone().normalize();
+    const a = Math.abs(d.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const u = new THREE.Vector3().crossVectors(d, a).normalize();
+    const w = new THREE.Vector3().crossVectors(d, u).normalize();
+    const pos = new THREE.Vector3(), vel = new THREE.Vector3(), rad = new THREE.Vector3();
+    const fwd = speed ?? 0.62 * strength;
+    const layer = (n, thick, size, alpha, expand) => {
+      for (let k = 0; k < n; k++) {
+        const th = (k / n) * Math.PI * 2 + Math.random() * 0.02;
+        rad.copy(u).multiplyScalar(Math.cos(th)).addScaledVector(w, Math.sin(th));
+        pos.copy(p).addScaledVector(rad, radius * strength + (Math.random() - 0.5) * thick).addScaledVector(d, (Math.random() - 0.5) * thick);
+        vel.copy(d).multiplyScalar(fwd).addScaledVector(rad, expand);
+        vel.y += 0.02;
+        this.emit(pos, vel, { size, grow: 0.05, life: 5.2, alpha, turb: 0.04, tint: 1 });
+      }
+    };
+    layer(120, 0.006, 0.032 * strength, 0.24, 0.045); // 심
+    layer(40, 0.022, 0.06 * strength, 0.07, 0.05);    // 테두리
+  }
+
+  /** (예전 도넛) */
+  ringOld(p, dir, strength = 1) {
     const d = dir.clone().normalize();
     const a = Math.abs(d.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
     const u = new THREE.Vector3().crossVectors(d, a).normalize();
@@ -239,13 +284,26 @@ export class SmokeSystem {
       if (s.french) {
         // 입에서 천천히 나와 위로 → 0.25초 뒤부터 코로 빨려 들어감
         if (s.t < s.dur) {
-          s.acc += dt * 70;
+          s.acc += dt * 120;
           while (s.acc > 1) {
             s.acc -= 1;
-            v3.copy(d).multiplyScalar(0.05 + Math.random() * 0.04);
-            v3.y += 0.03 + Math.random() * 0.03;
+            v3.copy(d).multiplyScalar(0.07 + Math.random() * 0.04);
+            v3.y -= 0.03 + Math.random() * 0.02; // 처음엔 입술 아래로 흘러나오고
+            v3.x += (Math.random() - 0.5) * 0.025; v3.z += (Math.random() - 0.5) * 0.025;
+            this.emit(p, v3, { size: 0.026, grow: 0.07, life: 2.6, alpha: 0.2, turb: 0.25, mode: MODE.BREATH, tint: 1, attract: s.nose, delay: 0.35 + Math.random() * 0.25 }); // 그 다음 코로 말려 올라감
+          }
+        }
+        continue;
+      }
+      if (s.sink) {
+        if (s.t < s.dur) {
+          s.acc += dt * 110 * (1 - s.t / s.dur * 0.6);
+          while (s.acc > 1) {
+            s.acc -= 1;
+            v3.copy(d).multiplyScalar(0.05 + Math.random() * 0.03);
+            v3.y = -0.05 - Math.random() * 0.05;
             v3.x += (Math.random() - 0.5) * 0.03; v3.z += (Math.random() - 0.5) * 0.03;
-            this.emit(p, v3, { size: 0.02, grow: 0.06, life: 2.2, alpha: 0.16, turb: 0.3, mode: MODE.BREATH, tint: 1, attract: s.nose, delay: 0.25 + Math.random() * 0.2 });
+            this.emit(p, v3, { size: 0.03, grow: 0.22, life: 5, alpha: 0.12, turb: 0.25, mode: MODE.SINK, tint: 1 });
           }
         }
         continue;
@@ -273,14 +331,14 @@ export class SmokeSystem {
         // f: 처음엔 세게, 끝으로 갈수록 약하게 (폐에서 다 빠져나가는 느낌)
         const k = s.t / s.dur;
         const f = Math.pow(1 - k, 0.7) * Math.min(1, s.t / 0.06);
-        s.acc += dt * (48 + 82 * s.v) * f * M.n;
+        s.acc += dt * (48 + 82 * s.v) * f * M.n * this.quality;
         side.crossVectors(d, up).normalize();
         while (s.acc > 1) {
           s.acc -= 1;
-          const speed = (0.8 + 1.8 * s.v) * (0.35 + 0.65 * f) * (0.7 + Math.random() * 0.6);
+          const speed = (0.8 + 1.8 * s.v) * (0.35 + 0.65 * f) * (0.7 + Math.random() * 0.6) * (M.speed ?? 1);
           v3.copy(d).multiplyScalar(speed);
           // 원뿔 모양으로 살짝 퍼지게
-          const spread = 0.2 + 0.16 * (1 - f);
+          const spread = (0.2 + 0.16 * (1 - f)) * (M.spread ?? 1);
           v3.addScaledVector(side, (Math.random() - 0.5) * spread * 2);
           v3.y += (Math.random() - 0.5) * spread * 1.5;
           this.emit(p, v3, {
@@ -333,7 +391,13 @@ export class SmokeSystem {
         const cx = Math.sin(py * 3.1 + t * 1.3 + s) + Math.cos(pz * 2.3 - t * 0.9 + s * 0.7);
         const cz = Math.cos(py * 2.7 + t * 1.1 + s * 1.7) + Math.sin(px * 2.1 + t * 0.8 - s);
         const cy = Math.sin(px * 1.7 + pz * 1.9 + t * 0.6 + s) * 0.5;
-        if (mode === MODE.BREATH) {
+        if (mode === MODE.SINK) {
+          // 아래로 가라앉고 바닥에 닿으면 옆으로 퍼짐
+          vy += (-0.16 - vy * 0.8) * dt;
+          vx *= Math.exp(-0.8 * dt); vz *= Math.exp(-0.8 * dt);
+          vx += cx * 0.06 * dt; vz += cz * 0.06 * dt;
+          if (py < 0.06) { vy = Math.max(vy, 0); vx += cx * 0.25 * dt; vz += cz * 0.25 * dt; }
+        } else if (mode === MODE.BREATH) {
           // 날숨: 입에서 나온 제트가 공기 저항으로 금방 느려짐 → 그 뒤 천천히 뜨며 퍼짐
           const jet = Math.exp(-(2.4 - Math.min(age, 1.2) * 1.3) * dt);
           vx *= jet; vy *= jet; vz *= jet;
@@ -372,7 +436,7 @@ export class SmokeSystem {
       this.vel[j] = vx; this.vel[j + 1] = vy; this.vel[j + 2] = vz;
       const k = age / life;
       this.ageN[i] = k;
-      if (mode === MODE.BREATH) {
+      if (mode === MODE.BREATH || mode === MODE.SINK) {
         // 날숨: 처음 0.15초 진하게 → 길게 옅어지며 커짐
         this.size[i] = this.size0[i] + this.grow[i] * Math.pow(age, 0.6);
         this.alpha[i] = this.alpha0[i] * Math.min(1, age * 10) * Math.pow(1 - k, 1.3);

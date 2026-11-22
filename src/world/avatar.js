@@ -245,9 +245,8 @@ export class Avatar {
     this.heatDev = createHeatDevice(1.35);
     this.vapeDev = createVape(1.35);
     for (const dvc of [this.heatDev, this.vapeDev]) {
-      dvc.group.position.copy(this.cig.position);
       dvc.group.visible = false;
-      this.R.hand.add(dvc.group);
+      this.group.add(dvc.group); // 손 위치를 따라가되 방향은 직접 (주먹으로 세워 쥠)
     }
     // 라이터 (왼손, 불붙일 때만)
     this.lighter = createLighter({ scale: 1.4, color: [0x2f6fd1, 0xd23a3a, 0x2fa15a, 0xe0b020][Math.floor(Math.random() * 4)] });
@@ -395,6 +394,7 @@ export class Avatar {
 
   setBodyVisible(v) {
     this.itemHolder.visible = v;
+    if (!v) this.heatDev.group.visible = this.vapeDev.group.visible = false; // 월드에 따로 있는 기기도 숨김
     this.model.visible = v;
     if (this.phone) this.phone.visible = v;
     if (this.nameSprite) this.nameSprite.visible = v;
@@ -483,6 +483,7 @@ export class Avatar {
     this.body.position.y = Math.abs(Math.sin(ph)) * 0.04 * moving + Math.sin(t * 1.8) * 0.004 * (1 - moving) + (st.si ? 0.08 : 0);
     this.body.rotation.z = Math.sin(ph) * 0.06 * moving + Math.sin(t * 0.4) * 0.02 * (1 - moving); // 뒤뚱뒤뚱
     this.body.rotation.x = run * 0.22 + (coughing ? Math.abs(Math.sin(t * 22)) * 0.18 : 0);
+    this.model.position.y = st.jy ?? 0; // 점프
     this.head.rotation.y = Math.sin(t * 0.27) * 0.3 * (1 - moving) * (1 - k);
     this.head.rotation.z = Math.sin(t * 0.6) * 0.05 * (1 - moving);
 
@@ -506,6 +507,16 @@ export class Avatar {
       this.heatDev.update(t);
       this.vapeDev.setFiring((st.inhale ?? 0) > 0.1);
       this.vapeDev.setLiquid(st.lq ?? 1);
+      if (c !== 0 && dv !== 0) {
+        // 주먹 안에 세워 쥔 기기: 평소엔 위를 보고, 빨 때(k) 드립팁이 입을 향함
+        const dvc = dv === 1 ? this.heatDev : this.vapeDev;
+        this.R.hand.getWorldPosition(dvc.group.position);
+        const toMouth = this.mouth.getWorldPosition(new THREE.Vector3()).sub(dvc.group.position).normalize();
+        const up = new THREE.Vector3(0, 1, 0).lerp(new THREE.Vector3(0, 0.45, 1).applyQuaternion(root.quaternion).normalize(), 0.25);
+        const dir = up.normalize().lerp(toMouth, k).normalize();
+        dvc.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        dvc.group.position.addScaledVector(dir, 0.045); // 주먹 위로 기기 윗부분이 나오게
+      }
       if (c !== 0) {
         const rest = new THREE.Vector3(-0.15, 0.6, 0.2), mouth = new THREE.Vector3(-0.05, 0.98, 0.25);
         const tl = rest.lerp(mouth, k);

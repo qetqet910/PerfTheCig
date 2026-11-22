@@ -18,5 +18,7 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
   fs.createReadStream(file).pipe(res);
 });
-attachRelay(server);
+// IP당 동시 접속 수 (기본 1). 같은 회사 친구들이 같이 들어와야 하면 Render 환경변수 MAX_PER_IP를 늘리기
+const MAX_PER_IP = Number(process.env.MAX_PER_IP) || 1;
+attachRelay(server, { maxPerIp: MAX_PER_IP });
 server.listen(PORT, () => console.log(`흡연장 오픈: http://localhost:${PORT}`));

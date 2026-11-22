@@ -18,6 +18,7 @@ import { Net } from './net/client.js';
 import { createOffice } from './office.js';
 import { createCoffeeMachine, createDrinkMachine, SNACKS } from './world/vending.js';
 import { createSnow, currentWeather } from './fx/snow.js';
+import { createDecorations } from './world/decorations.js';
 import { DEVICES, HEAT_PUFFS } from './smoke/smoker.js';
 import { TRICKS } from './smoke/tricks.js';
 
@@ -67,6 +68,8 @@ scene.add(city.group);
 const kolon = createKolon(city.excluded[KOLON], { envMap });
 scene.add(kolon.group);
 const area = createSmokingArea({ envMap });
+const deco = createDecorations();
+scene.add(deco.group);
 
 // ---------- 지갑 + 자판기 (1차 벽 쪽, 통로를 바라봄) ----------
 const wallet = {
@@ -109,9 +112,10 @@ scene.add(people.group);
 const rain = createRain(9000, { shelters: [SHELTER] });
 rain.enabled = true;
 scene.add(rain.object);
-const snow = createSnow(2600, { shelters: [SHELTER] });
+const snow = createSnow(6500, { shelters: [SHELTER] });
+snow.level = 1;
 scene.add(snow.object);
-let snowCover = 0, weatherKind = null;
+let snowCover = 0.85, weatherKind = null; // 겨울 내내 내린 눈 → 처음부터 쌓여 있음
 
 const post = createPost(renderer, scene, camera);
 
@@ -120,6 +124,7 @@ const world = new CollisionWorld();
 world.add(city.colliders);
 world.add(kolon.colliders);
 world.add(area.colliders);
+world.add(deco.colliders);
 world.add({ boxes: [[COFFEE_POS.x, COFFEE_POS.z, ...coffeeMachine.collider, 0], [DRINK_POS.x, DRINK_POS.z, ...drinkMachine.collider, 0], [SNACK_POS.x, SNACK_POS.z, ...snackMachine.collider, 0]] });
 world.add({ circles: PEOPLE.map((p) => [p.x, p.z, 0.4]) });
 
@@ -144,9 +149,18 @@ const fp = new FirstPerson({
   camera, dom: renderer.domElement, world, smoke, scene,
   onTrick: (phase, i) => {
     if (phase === 'start') { inhaleOneShot = 0.9; return; }
+    if (phase === 'suck') { sfx.suck(); return; }
+    if (phase === 'pop') { sfx.pop(); return; }
     sfx.exhale(0.8);
     net.send({ t: 'ev', kind: 'trick', idx: i, device: fp.smoker.device });
     if (!trickSeen.has(i)) { trickSeen.add(i); office.toast('시스템', `묘기: ${TRICKS[i].name}`, true); }
+  },
+  onStep: (kind, feet) => {
+    const S = SHELTER;
+    const under = feet.x > S.x0 && feet.x < S.x1 && feet.z > S.z0 && feet.z < S.z1;
+    if (!under && snowCover > 0.25) { sfx.snowStep(); if (kind === 'land') setTimeout(() => sfx.snowStep(), 60); }
+    else if (!under && wet > 0.3) sfx.splash();
+    else sfx.step();
   },
   onSit: (on) => { sfx.sit(); if (on) office.toast('시스템', '앉았다. 움직이면(WASD) 일어남', true); },
   onItemEvent: (name, it) => {
@@ -291,7 +305,7 @@ function addRemote(p) {
   av.root.position.set(p.x, 0, p.z);
   av.root.rotation.y = p.ry;
   scene.add(av.group);
-  remotes.set(p.id, { av, name: p.name, tx: p.x, tz: p.z, try: p.ry, st: { speed: p.s, k: p.k, inhale: p.inh, c: p.c, len: p.len, ash: p.ash, it: p.it, ii: p.ii, if: p.if, sp: p.sp, si: p.si, dv: p.dv, lq: p.lq } });
+  remotes.set(p.id, { av, name: p.name, tx: p.x, tz: p.z, try: p.ry, st: { speed: p.s, k: p.k, inhale: p.inh, c: p.c, len: p.len, ash: p.ash, it: p.it, ii: p.ii, if: p.if, sp: p.sp, si: p.si, dv: p.dv, lq: p.lq, jy: p.jy } });
 }
 function removeRemote(id) {
   const r = remotes.get(id);
@@ -318,7 +332,7 @@ const net = new Net({
     const r = remotes.get(m.id);
     if (!r) return;
     Object.assign(r, { tx: m.x, tz: m.z, try: m.ry });
-    Object.assign(r.st, { speed: m.s, k: m.k, inhale: m.inh, c: m.c, len: m.len, ash: m.ash, it: m.it, ii: m.ii, if: m.if, sp: m.sp, si: m.si, dv: m.dv, lq: m.lq });
+    Object.assign(r.st, { speed: m.s, k: m.k, inhale: m.inh, c: m.c, len: m.len, ash: m.ash, it: m.it, ii: m.ii, if: m.if, sp: m.sp, si: m.si, dv: m.dv, lq: m.lq, jy: m.jy });
   },
   puff: (m) => {
     const r = remotes.get(m.id);
@@ -367,7 +381,9 @@ const net = new Net({
   },
   denied: (m) => {
     document.body.classList.add('denied');
-    $('deniedMsg').textContent = `이 브라우저에서 이미 창 ${m.max}개로 접속 중이에요. 다른 창을 닫고 새로고침해 주세요.`;
+    $('deniedMsg').textContent = m.reason === 'ip'
+      ? '이 인터넷(IP)에서 이미 누가 접속해 있어요. 한 IP당 한 명만 들어올 수 있어요.'
+      : `이 브라우저에서 이미 창 ${m.max}개로 접속 중이에요. 다른 창을 닫고 새로고침해 주세요.`;
     fp.exit();
   },
   status: refreshOnline,
@@ -468,7 +484,7 @@ document.addEventListener('dragover', (e) => e.preventDefault(), { capture: true
 renderer.domElement.setAttribute('draggable', 'false');
 
 // ---------- 단축키 ----------
-let wet = 1;
+let wet = 0;
 addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement || e.repeat) return;
   if (e.key === 'Enter') { e.preventDefault(); openChat(); }
@@ -611,7 +627,7 @@ function onPickUp(item) {
 }
 
 // 빨기 소리 (누르는 동안)
-let inhaleSound = null, inhaleOneShot = 0, breathT = 2;
+let inhaleSound = null, inhaleOneShot = 0, breathT = 2, frameAvg = 16;
 const trickSeen = new Set();
 
 // ---------- loop ----------
@@ -631,7 +647,8 @@ renderer.setAnimationLoop(() => {
     $('weather').textContent = W.kind === 'snow' ? '눈' : '비';
   }
   snow.level = THREE.MathUtils.clamp(snow.level + (W.kind === 'snow' ? dt / 8 : -dt / 8), 0, 1);
-  snowCover = THREE.MathUtils.clamp(snowCover + (W.kind === 'snow' ? dt / 90 : -dt / 150), 0, 1);
+  snowCover = THREE.MathUtils.clamp(snowCover + (W.kind === 'snow' ? dt / 40 : -dt / 150), 0, 1);
+  deco.setSnow(snowCover);
   wet = THREE.MathUtils.clamp(wet + (rain.enabled ? dt / 6 : -dt / 20), 0, 1);
   city.setWetness(wet, snowCover);
   kolon.setSnow(snowCover);
@@ -666,7 +683,7 @@ renderer.setAnimationLoop(() => {
     if (!fp.active) { st.s = 0; }
     myAvatar.root.position.set(st.x, 0, st.z);
     myAvatar.root.rotation.y = st.ry;
-    myAvatar.update(dt, { speed: st.s, k: st.k, inhale: st.inh, c: st.c, len: st.len, ash: st.ash, flame: sm.flame, it: st.it, ii: st.ii, if: st.if, sp: st.sp, si: st.si, dv: st.dv, lq: st.lq });
+    myAvatar.update(dt, { speed: st.s, k: st.k, inhale: st.inh, c: st.c, len: st.len, ash: st.ash, flame: sm.flame, it: st.it, ii: st.ii, if: st.if, sp: st.sp, si: st.si, dv: st.dv, lq: st.lq, jy: st.jy });
     net.sendState(st);
     updateHud(dt);
     office.update(dt, { smoking: sm.state === 'lit' });
@@ -686,6 +703,10 @@ renderer.setAnimationLoop(() => {
     area.trays.forEach((tr, i) => tr.setHighlight(i === n.idx && n.dist < 1.1 && fp.smoker.state !== 'none'));
   } else area.trays.forEach((tr) => tr.setHighlight(false));
   area.update(dt, smoke);
+  deco.update();
+  // 프레임이 떨어지면 연기 양 자동으로 줄임
+  frameAvg += (dt * 1000 - frameAvg) * 0.05;
+  smoke.adapt(frameAvg);
   machines.forEach((m) => m.update(dt));
   if (!comboShown && fp.item?.type === 'cup' && fp.smoker.state === 'lit') { comboShown = true; office.toast('시스템', '커피 한 잔 + 담배 한 대. 직장인 세트 완성', true); }
   updateAim();

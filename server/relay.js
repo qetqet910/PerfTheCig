@@ -17,7 +17,21 @@ const COLORS = /^#[0-9a-f]{6}$/i;
 const num = (v, lim = 1e4) => (Number.isFinite(v) ? Math.max(-lim, Math.min(lim, v)) : 0);
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
 
-export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}) {
+/**
+ * 접속 IP. Render 등 프록시 뒤면 x-forwarded-for의 "마지막" 값(프록시가 직접 붙인 값)을 씀.
+ * 첫 번째 값은 클라이언트가 헤더를 직접 넣어서 속일 수 있음.
+ */
+function clientIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  if (typeof xf === 'string' && xf.length) return xf.split(',').pop().trim();
+  return req.socket?.remoteAddress || '';
+}
+
+/**
+ * maxPerIp: 같은 IP에서 동시에 들어올 수 있는 사람 수 (기본 1, Infinity면 제한 없음)
+ *   같은 회사/와이파이는 공인 IP가 같은 경우가 많으니 필요하면 MAX_PER_IP 환경변수로 늘리기
+ */
+export function attachRelay(httpServer, { path = '/ws', log = console.log, maxPerIp = 1 } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 });
   const players = new Map(); // id -> { ws, info, sid }
   const butts = [];           // [x, z] 바닥 꽁초 (공유)
@@ -36,7 +50,8 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
     for (const [id, p] of players) if (id !== exceptId && p.ws.readyState === 1) p.ws.send(data);
   };
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    const ip = req ? clientIp(req) : '';
     if (players.size >= MAX_PLAYERS) { ws.close(1013, 'full'); return; }
     let id = null;
     let lastChat = 0;
@@ -50,6 +65,12 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
 
       if (m.t === 'hello' && id === null) {
         // 세션당 창 수 제한
+        // IP당 접속 수 제한
+        if (ip && Number.isFinite(maxPerIp)) {
+          let n = 0;
+          for (const p of players.values()) if (p.ip === ip) n++;
+          if (n >= maxPerIp) { send(ws, { t: 'denied', reason: 'ip', max: maxPerIp }); ws.close(4002, 'ip limit'); return; }
+        }
         const sid = clean(m.sid, 64);
         if (sid) {
           let n = 0;
@@ -63,7 +84,7 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
           color: COLORS.test(m.color) ? m.color : '#2b2f38',
           x: 0, z: 0, ry: 0, s: 0, k: 0, inh: 0, c: 0, len: 1, ash: 0, it: 0, ii: -1, if: 0, sp: 0, si: 0, dv: 0, lq: 1,
         };
-        players.set(id, { ws, info, sid });
+        players.set(id, { ws, info, sid, ip });
         send(ws, { t: 'welcome', id, butts, trayButts, players: [...players.values()].filter((p) => p.info.id !== id).map((p) => p.info) });
         broadcast({ t: 'join', player: info }, id);
         log(`[relay] join #${id} ${info.name} (${players.size})`);
@@ -76,7 +97,7 @@ export function attachRelay(httpServer, { path = '/ws', log = console.log } = {}
         Object.assign(me, {
           x: num(m.x, 2000), z: num(m.z, 2000), ry: num(m.ry, 100), s: num(m.s, 20), k: num(m.k, 1), inh: num(m.inh, 1),
           c: Math.round(num(m.c, 3)), len: num(m.len, 1), ash: num(m.ash, 0.1),
-          si: m.si ? 1 : 0, dv: Math.max(0, Math.round(num(m.dv, 2))), lq: Math.max(0, num(m.lq ?? 1, 1)),
+          si: m.si ? 1 : 0, jy: Math.max(0, num(m.jy, 2)), dv: Math.max(0, Math.round(num(m.dv, 2))), lq: Math.max(0, num(m.lq ?? 1, 1)),
           it: Math.max(0, Math.round(num(m.it, 3))), ii: Math.round(num(m.ii, 20)), if: num(m.if, 1), sp: num(m.sp, 1),
         });
         const { name, color, ...st } = me;

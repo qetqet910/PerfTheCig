@@ -18,7 +18,8 @@ const SPAWN = { pos: new THREE.Vector3(-5.0, 0, 2.6), lookAt: new THREE.Vector3(
  *   G: 꺼내서 불붙이기 / 꽁초 버리기 / (없으면) 한 개비 빌리기   X: 재 털기
  */
 export class FirstPerson {
-  constructor({ camera, dom, world, smoke, scene, onLockChange, onSmokerEvent, getContext, onItemEvent, onTrick, onSit, device = 'cig' }) {
+  constructor({ camera, dom, world, smoke, scene, onLockChange, onSmokerEvent, getContext, onItemEvent, onTrick, onSit, onStep, device = 'cig' }) {
+    this.onStep = onStep;
     this.onItemEvent = onItemEvent;
     this.onTrick = onTrick;
     this.onSit = onSit;
@@ -31,6 +32,9 @@ export class FirstPerson {
     this.sipT = 0;
     this.wheelUntil = 0;
     this.qDownAt = -1;
+    this.jumpY = 0;     // 점프 높이
+    this.jumpV = 0;
+    this.stepPhase = 0; // 발소리 타이밍
     this.sipBlock = 0;
     this.slurpAcc = 0;
     this.steamAcc = 0;
@@ -67,7 +71,12 @@ export class FirstPerson {
       }
       if (e.code === 'KeyG') this.smoker.context(this.getContext());
       if (e.code === 'KeyX') this.smoker.flick();
-      const tk = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (this.seat) this.stand();
+        else if (this.jumpY <= 0 && this.jumpV === 0) this.jumpV = 3.3; // 약 55cm
+      }
+      const tk = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code);
       if (tk >= 0) this.startTrick(tk);
     });
     addEventListener('keyup', (e) => {
@@ -138,13 +147,17 @@ export class FirstPerson {
       f.position.set(0.026, y + 0.004, 0.01);
       this.vm.add(f);
     }
+    // 전자담배: 담배와 따로. 기기를 세워서(+Y=입) 주먹으로 감싸 쥠
+    this.devVm = new THREE.Group();
     this.heatDev = createHeatDevice(1);
-    this.heatDev.group.quaternion.copy(this.cig.group.quaternion);
-    this.heatDev.group.position.set(-0.012, -0.002, 0.018);
     this.vapeDev = createVape(1);
-    this.vapeDev.group.quaternion.copy(this.cig.group.quaternion);
-    this.vapeDev.group.position.set(-0.012, -0.002, 0.018);
-    this.vm.add(this.heatDev.group, this.vapeDev.group);
+    this.devVm.add(this.heatDev.group, this.vapeDev.group);
+    // SD 캐릭터 스타일 주먹: 통통한 주먹 + 볼록한 손가락 마디 + 감싸는 엄지 + 소매, 툰 셰이딩 + 외곽선
+    const fist = buildFist();
+    this.devVm.add(fist);
+    this.devVm.traverse((o) => { o.renderOrder = 20; });
+    this.devVm.visible = false;
+    camera.add(this.devVm);
     this.vm.visible = false;
     this.vm.scale.setScalar(1.05);
     camera.add(this.vm);
@@ -374,6 +387,7 @@ export class FirstPerson {
       x: this.feet.x, z: this.feet.z,
       ry: this.seat ? this.seat.yaw : e.y + Math.PI, // 카메라는 -z를 봄 → 아바타(+z 정면) yaw
       si: this.seat ? 1 : 0,
+      jy: this.jumpY,
       dv: { cig: 0, heat: 1, vape: 2 }[sm.device],
       lq: sm.liquid,
       s: this.vel.length(),
@@ -423,9 +437,25 @@ export class FirstPerson {
     this.bob += dt * sp * (running ? 2.3 : 2.9);
     const bobAmt = Math.min(sp / RUN, 1) * (running ? 0.045 : 0.03);
     const by = Math.sin(this.bob * 2) * bobAmt;
+    // 점프
+    if (this.jumpV !== 0 || this.jumpY > 0) {
+      this.jumpY += this.jumpV * dt;
+      this.jumpV -= 9.8 * dt;
+      if (this.jumpY <= 0) {
+        const hard = this.jumpV < -2;
+        this.jumpY = 0; this.jumpV = 0;
+        this.onStep?.(hard ? 'land' : 'step', this.feet);
+      }
+    }
+    // 발소리: 걸음 주기마다 (땅에 있을 때)
+    const phase = Math.floor((this.bob * 2) / Math.PI);
+    if (phase !== this.stepPhase) {
+      this.stepPhase = phase;
+      if (sp > 0.4 && this.jumpY <= 0 && !this.seat) this.onStep?.('step', this.feet);
+    }
     this.shake = Math.max(0, this.shake - dt);
     const sh = this.shake > 0 ? Math.sin(this.shake * 40) * 0.025 * Math.min(1, this.shake) : 0;
-    this.camera.position.set(this.feet.x, (this.seat ? EYE_SIT : EYE) + by + Math.abs(sh), this.feet.z);
+    this.camera.position.set(this.feet.x, (this.seat ? EYE_SIT : EYE) + by + Math.abs(sh) + this.jumpY, this.feet.z);
 
     // --- 묘기 진행: 한 모금 빨아들임(prep) → 연출 ---
     let trickRaise = 0;
@@ -436,7 +466,10 @@ export class FirstPerson {
       if (!T.done && T.t >= def.prep) {
         T.done = true;
         const vapor = sm.device === 'cig' ? 'smoke' : sm.device;
-        performTrick(this.smoke, T.i, () => this.mouthOrigin(), { vapor });
+        performTrick(this.smoke, T.i, () => this.mouthOrigin(), {
+          vapor,
+          hooks: { shake: (k) => { this.shake = k; }, suck: () => this.onTrick?.('suck', T.i), pop: (n) => this.onTrick?.('pop', n) },
+        });
         this.onTrick?.('perform', T.i);
       }
       if (T.t > def.prep + 2.2) this.trick = null;
@@ -445,7 +478,8 @@ export class FirstPerson {
     // --- 뷰모델 ---
     const has = sm.state !== 'none';
     const lighting = sm.state === 'lighting';
-    this.vm.visible = has;
+    this.vm.visible = has && sm.device === 'cig';
+    this.devVm.visible = has && sm.device !== 'cig';
     const dev = sm.device;
     const raise = (lighting && dev === 'cig') || (sm.holding && sm.canInhale) || trickRaise ? 1 : 0;
     // 기기별로 손에 든 것
@@ -465,6 +499,13 @@ export class FirstPerson {
       THREE.MathUtils.lerp(-0.4, -0.31, t),
     );
     this.vm.rotation.set(THREE.MathUtils.lerp(0.25, 0.9, t), THREE.MathUtils.lerp(-0.5, -0.1, t), 0);
+    // 전자담배: 평소엔 오른쪽 아래에 세워 들고, 빨 때 입에 갖다 댐 (드립팁이 입 쪽으로 기울어짐)
+    this.devVm.position.set(
+      THREE.MathUtils.lerp(0.16, 0.012, t) + Math.cos(this.bob) * bobAmt * 0.6 + sh * 0.5,
+      THREE.MathUtils.lerp(-0.13, -0.06, t) + by * 0.5,
+      THREE.MathUtils.lerp(-0.34, -0.15, t),
+    );
+    this.devVm.rotation.set(THREE.MathUtils.lerp(0.12, 1.2, t), THREE.MathUtils.lerp(-0.3, 0, t), THREE.MathUtils.lerp(0.12, 0, t));
 
     // 재 털기: 손을 재떨이 위로 → 검지로 툭(0.3s) 툭(0.45s) → 복귀
     let ashShown = sm.state === 'lit' ? sm.ash : 0;
@@ -592,4 +633,62 @@ export class FirstPerson {
   cam2local(world) {
     return this.camera.worldToLocal(world.clone());
   }
+}
+
+// ---------- 1인칭 주먹 (전자담배 쥘 때) ----------
+let TOON_GRAD = null;
+function toonMat(color) {
+  if (!TOON_GRAD) {
+    TOON_GRAD = new THREE.DataTexture(new Uint8Array([110, 185, 255]), 3, 1, THREE.RedFormat);
+    TOON_GRAD.minFilter = TOON_GRAD.magFilter = THREE.NearestFilter;
+    TOON_GRAD.needsUpdate = true;
+  }
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_GRAD });
+}
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x0b0c10, side: THREE.BackSide });
+
+/**
+ * 기기를 감싸 쥔 주먹. 기기는 원점에서 +Y가 입, 본체는 -0.02 ~ -0.1 구간.
+ * 손가락 마디는 앞(카메라 쪽)에서 기기를 감쌈, 손목·소매는 오른쪽 아래로 이어짐.
+ */
+function buildFist() {
+  const g = new THREE.Group();
+  const skin = toonMat(0xffd7bc);
+  const crease = new THREE.MeshBasicMaterial({ color: 0xc89478 });
+  const sleeveM = toonMat(0x3a4a62);
+  const part = (geo, mat, x, y, z, sx = 1, sy = 1, sz = 1, outline = 0.06) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.scale.set(sx, sy, sz);
+    g.add(m);
+    if (outline) {
+      const o = new THREE.Mesh(geo, OUTLINE_MAT);
+      o.scale.setScalar(1 + outline);
+      m.add(o);
+    }
+    return m;
+  };
+  // 주먹 몸통: 둥글게 (손바닥 + 손등)
+  part(new THREE.SphereGeometry(0.03, 20, 16), skin, 0.008, -0.068, -0.004, 1.15, 1.25, 1.0);
+  // 손가락 마디 4개: 기기 앞을 가로로 감싼 둥근 볼록이
+  for (let i = 0; i < 4; i++) {
+    const y = -0.047 - i * 0.0145;
+    part(new THREE.CapsuleGeometry(0.0082, 0.03, 6, 12), skin, 0.004, y, 0.019, 1, 1, 1, 0.08).rotation.z = Math.PI / 2;
+    if (i < 3) { // 마디 사이 주름
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.0012, 0.002), crease);
+      c.position.set(0.004, y - 0.0072, 0.0275);
+      g.add(c);
+    }
+  }
+  // 엄지: 옆에서 감싸 올라와 기기 옆면을 누름
+  const thumb = part(new THREE.CapsuleGeometry(0.0085, 0.026, 6, 12), skin, -0.017, -0.045, 0.008, 1, 1, 1, 0.08);
+  thumb.rotation.set(0.15, 0, 0.35);
+  // 손목 + 소매
+  const wrist = part(new THREE.CylinderGeometry(0.02, 0.022, 0.05, 14), skin, 0.02, -0.11, -0.012, 1, 1, 1, 0.06);
+  wrist.rotation.z = -0.5;
+  const sleeve = part(new THREE.CylinderGeometry(0.03, 0.034, 0.16, 16), sleeveM, 0.06, -0.175, -0.02, 1, 1, 1, 0.04);
+  sleeve.rotation.z = -0.5;
+  const cuff = part(new THREE.TorusGeometry(0.03, 0.006, 8, 18), sleeveM, 0.035, -0.128, -0.016, 1, 1, 1, 0);
+  cuff.rotation.set(Math.PI / 2, 0.5, 0);
+  return g;
 }
