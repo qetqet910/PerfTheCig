@@ -460,6 +460,13 @@ chatInput.addEventListener('blur', () => {
   document.body.classList.toggle('paused', fp.active && !fp.isLocked);
 });
 
+// ---------- 브라우저 기본 드래그/선택 막기 (입력창 제외) ----------
+// Whale 드래그 앤 드롭 검색, 이미지·글자 끌어서 새 탭, 더블클릭 선택 등
+const isInput = (e) => e.target instanceof HTMLInputElement;
+for (const type of ['dragstart', 'selectstart', 'drop']) document.addEventListener(type, (e) => { if (!isInput(e)) e.preventDefault(); }, { capture: true });
+document.addEventListener('dragover', (e) => e.preventDefault(), { capture: true });
+renderer.domElement.setAttribute('draggable', 'false');
+
 // ---------- 단축키 ----------
 let wet = 1;
 addEventListener('keydown', (e) => {

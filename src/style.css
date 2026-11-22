@@ -114,3 +114,7 @@ body.aiming .crosshair { width: 10px; height: 10px; margin: -5px 0 0 -5px; backg
 body.denied .deniedBox { display: grid; }
 .deniedBox .big { font-size: 22px; font-weight: 800; }
 .deniedBox .small { font-size: 13px; opacity: .7; margin-top: 10px; max-width: 360px; }
+
+/* 브라우저 드래그 동작 막기 (Whale 드래그 검색 / 이미지·글자 끌기 / 텍스트 선택) */
+html, body, #app, #hud, canvas { user-select: none; -webkit-user-select: none; -webkit-user-drag: none; -webkit-touch-callout: none; }
+input { user-select: text; -webkit-user-select: text; }
